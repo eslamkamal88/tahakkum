@@ -25,7 +25,7 @@ export function startScheduler(store, log = console.log) {
         }
         if (result.ok) {
             if (result.orders.length) {
-                store.data.orders = store.data.orders.filter((o) => !(o.brand_id === acc.brand_id && o.platform === acc.platform && o.demo));
+                store.remove('orders', (o) => o.brand_id === acc.brand_id && o.platform === acc.platform && o.demo);
             }
             for (const o of result.orders) {
                 if (store.find('orders', (x) => x.brand_id === acc.brand_id && x.platform === acc.platform && x.platform_order_id === o.platform_order_id).length) continue;
