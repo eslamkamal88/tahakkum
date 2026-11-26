@@ -144,7 +144,7 @@ async function buildPdf(brand, summary) {
             doc.text(ar('لا توجد طلبات مسجلة هذا الأسبوع.'), { align: 'right' });
         }
         for (const [p, s] of platforms) {
-            const name = PLATFORM_AR[p] || p;
+            const name = (PLATFORM_AR[p] || p) + (s.demo ? ' (بيانات تجريبية)' : '');
             doc.text(ar(`${name}: ${s.orders} طلب، مبيعات ${fmt(s.gross)} ر.س، صافي ${fmt(s.net)} ر.س، ملغي ${s.cancelled} (${fmt(s.cancelled_gross)} ر.س)`), { align: 'right' });
             doc.moveDown(0.2);
         }
