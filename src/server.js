@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Store } from './store.js';
 import { encryptSecret, decryptSecret, hashPassword, verifyPassword, randomToken } from './vault.js';
-import { seed } from './seed.js';
+import { seed, seedCatalog } from './seed.js';
 import { startScheduler } from './scheduler.js';
 import { PLATFORMS, getConnector } from './connectors/index.js';
 
@@ -53,12 +53,15 @@ function brandDashboard(brandId) {
         const po = today.filter((o) => o.platform === p);
         byPlatform[p] = { orders: po.length, gross: Math.round(po.reduce((s, o) => s + o.gross, 0) * 100) / 100 };
     }
+    const all = store.find('orders', (o) => o.brand_id === brandId);
     return {
         today_orders: today.length,
         today_gross: Math.round(today.reduce((s, o) => s + o.gross, 0) * 100) / 100,
         today_net: Math.round(today.reduce((s, o) => s + o.net, 0) * 100) / 100,
         by_platform: byPlatform,
         menu: store.find('menu_items', (m) => m.brand_id === brandId),
+        offers: store.find('offers', (o) => o.brand_id === brandId),
+        demo: all.length > 0 && all.every((o) => o.demo !== false),
     };
 }
 
@@ -91,7 +94,7 @@ const server = http.createServer(async (req, res) => {
 
         if (url.pathname === '/api/me') return send(res, 200, { email: user.email, role: user.role, name: user.name });
 
-        if (url.pathname === '/api/brands') {
+        if (url.pathname === '/api/brands' && req.method === 'GET') {
             const brands = user.role === 'owner' ? store.data.brands : store.find('brands', (b) => b.tenant_id === user.id);
             return send(res, 200, { brands });
         }
@@ -108,6 +111,21 @@ const server = http.createServer(async (req, res) => {
             return send(res, 200, { merchant: { id: merchant.id, email: merchant.email, role: 'merchant' }, brand });
         }
 
+        // Self-service: any signed-in user adds a brand to their own account.
+        if (url.pathname === '/api/brands' && req.method === 'POST') {
+            const { name_ar, name_en } = await readBody(req);
+            if (!name_ar && !name_en) return send(res, 400, { error: 'name_required' });
+            const brand = store.insert('brands', {
+                key: 'brand_' + randomToken().slice(0, 8),
+                name_ar: name_ar || name_en, name_en: name_en || name_ar,
+                factor: 1, tenant_id: user.id,
+            });
+            seedCatalog(store, brand);
+            store.insert('audit_log', { actor: user.email, action: 'brand_created', brand_id: brand.id });
+            await store.flush();
+            return send(res, 200, { brand });
+        }
+
         const canAccess = (brandId) => {
             const b = store.one('brands', (x) => x.id === brandId);
             return b && (user.role === 'owner' || b.tenant_id === user.id) ? b : null;
@@ -117,6 +135,37 @@ const server = http.createServer(async (req, res) => {
         if (dashMatch) {
             if (!canAccess(dashMatch[1])) return send(res, 403, { error: 'forbidden' });
             return send(res, 200, brandDashboard(dashMatch[1]));
+        }
+
+        const menuMatch = url.pathname.match(/^\/api\/brands\/([^/]+)\/menu\/([^/]+)$/);
+        if (menuMatch && req.method === 'PATCH') {
+            if (!canAccess(menuMatch[1])) return send(res, 403, { error: 'forbidden' });
+            const { available } = await readBody(req);
+            const item = store.one('menu_items', (m) => m.id === menuMatch[2] && m.brand_id === menuMatch[1]);
+            if (!item) return send(res, 404, { error: 'not_found' });
+            store.update('menu_items', item.id, { available: !!available });
+            await store.flush();
+            return send(res, 200, { item: store.one('menu_items', (m) => m.id === item.id) });
+        }
+
+        const offersMatch = url.pathname.match(/^\/api\/brands\/([^/]+)\/offers$/);
+        if (offersMatch && !canAccess(offersMatch[1])) return send(res, 403, { error: 'forbidden' });
+        if (offersMatch && req.method === 'POST') {
+            const { title_ar, discount_pct } = await readBody(req);
+            if (!title_ar) return send(res, 400, { error: 'title_required' });
+            const offer = store.insert('offers', { brand_id: offersMatch[1], title_ar, discount_pct: Number(discount_pct) || 0, active: true, demo: true });
+            await store.flush();
+            return send(res, 200, { offer });
+        }
+        const offerMatch = url.pathname.match(/^\/api\/brands\/([^/]+)\/offers\/([^/]+)$/);
+        if (offerMatch && req.method === 'PATCH') {
+            if (!canAccess(offerMatch[1])) return send(res, 403, { error: 'forbidden' });
+            const { active } = await readBody(req);
+            const offer = store.one('offers', (o) => o.id === offerMatch[2] && o.brand_id === offerMatch[1]);
+            if (!offer) return send(res, 404, { error: 'not_found' });
+            store.update('offers', offer.id, { active: !!active });
+            await store.flush();
+            return send(res, 200, { offer: store.one('offers', (o) => o.id === offer.id) });
         }
 
         const accMatch = url.pathname.match(/^\/api\/brands\/([^/]+)\/platform-accounts$/);
@@ -134,6 +183,25 @@ const server = http.createServer(async (req, res) => {
                 vault_ref: encryptSecret(password), status: 'pending', consecutive_failures: 0,
             });
             store.insert('audit_log', { actor: user.email, action: 'credential_stored', platform, account_id: acc.id });
+            // Instant reflect: real partner APIs are pending approval, so until a
+            // connector is enabled we generate clearly-marked demo orders for this
+            // platform the first time credentials are saved, and log a sync job.
+            if (store.find('orders', (o) => o.brand_id === accMatch[1] && o.platform === platform).length === 0) {
+                const started = Date.now();
+                const n = 3 + Math.floor(Math.random() * 6);
+                for (let i = 0; i < n; i++) {
+                    const gross = Math.round((30 + Math.random() * 120) * 100) / 100;
+                    store.insert('orders', {
+                        brand_id: accMatch[1], platform,
+                        platform_order_id: `${platform}-${Date.now()}-${i}`,
+                        status: 'completed', gross, commission_rate: 0.18,
+                        net: Math.round(gross * 0.82 * 100) / 100,
+                        placed_at: new Date(Date.now() - Math.random() * 43200000).toISOString(),
+                        demo: true,
+                    });
+                }
+                store.insert('sync_jobs', { brand_id: accMatch[1], platform, type: 'demo_sync', orders: n, at: new Date().toISOString(), duration_ms: Date.now() - started });
+            }
             // Verify login asynchronously; stub connectors report not_implemented.
             const readSecret = async (a) => decryptSecret(a.vault_ref);
             const result = (await getConnector(platform)).login ? await (await getConnector(platform)).login(acc, { readSecret }) : { ok: false, reason: 'connector_not_implemented' };
