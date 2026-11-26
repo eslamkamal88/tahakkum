@@ -183,10 +183,41 @@ const server = http.createServer(async (req, res) => {
                 vault_ref: encryptSecret(password), status: 'pending', consecutive_failures: 0,
             });
             store.insert('audit_log', { actor: user.email, action: 'credential_stored', platform, account_id: acc.id });
-            // Instant reflect: real partner APIs are pending approval, so until a
-            // connector is enabled we generate clearly-marked demo orders for this
-            // platform the first time credentials are saved, and log a sync job.
-            if (store.find('orders', (o) => o.brand_id === accMatch[1] && o.platform === platform).length === 0) {
+            // Real pull first: try the platform connector (portal login with the
+            // merchant's own credentials). On success, store the real orders.
+            const readSecret = async (a) => decryptSecret(a.vault_ref);
+            let result = { ok: false, reason: 'connector_not_implemented' };
+            let pulled = 0;
+            try {
+                const connector = await getConnector(platform);
+                if (connector && connector.login) {
+                    result = await connector.login(acc, { readSecret });
+                    if (result.ok && result.session && connector.fetchOrders) {
+                        const fo = await connector.fetchOrders(acc, { readSecret, session: result.session });
+                        if (fo.ok && fo.orders && fo.orders.length) {
+                            for (const o of fo.orders) {
+                                if (store.find('orders', (x) => x.brand_id === accMatch[1] && x.platform === platform && x.platform_order_id === o.platform_order_id).length) continue;
+                                store.insert('orders', {
+                                    brand_id: accMatch[1], platform,
+                                    platform_order_id: o.platform_order_id,
+                                    status: o.status || 'completed', gross: o.gross || 0,
+                                    commission_rate: o.commission_rate ?? 0.18, net: o.net ?? (o.gross || 0) * 0.82,
+                                    placed_at: o.placed_at || new Date().toISOString(), demo: false,
+                                });
+                                pulled++;
+                            }
+                            store.insert('sync_jobs', { brand_id: accMatch[1], platform, type: 'real_sync', orders: pulled, at: new Date().toISOString() });
+                        }
+                    }
+                }
+            } catch (e) {
+                result = { ok: false, reason: 'portal_error' };
+            }
+            // Instant reflect: when the real pull could not add orders (connector
+            // not implemented, invalid credentials, 2FA...), we still generate
+            // clearly-marked demo orders for this platform the first time
+            // credentials are saved, so the dashboard shows its shape.
+            if (pulled === 0 && store.find('orders', (o) => o.brand_id === accMatch[1] && o.platform === platform).length === 0) {
                 const started = Date.now();
                 const n = 3 + Math.floor(Math.random() * 6);
                 for (let i = 0; i < n; i++) {
@@ -202,10 +233,11 @@ const server = http.createServer(async (req, res) => {
                 }
                 store.insert('sync_jobs', { brand_id: accMatch[1], platform, type: 'demo_sync', orders: n, at: new Date().toISOString(), duration_ms: Date.now() - started });
             }
-            // Verify login asynchronously; stub connectors report not_implemented.
-            const readSecret = async (a) => decryptSecret(a.vault_ref);
-            const result = (await getConnector(platform)).login ? await (await getConnector(platform)).login(acc, { readSecret }) : { ok: false, reason: 'connector_not_implemented' };
-            store.update('platform_accounts', acc.id, { status: result.ok ? 'active' : 'needs_setup', last_error: result.reason });
+            const status = result.ok ? 'active'
+                : result.reason === 'invalid_credentials' ? 'invalid_credentials'
+                : result.reason === 'needs_2fa' ? 'needs_2fa'
+                : 'needs_setup';
+            store.update('platform_accounts', acc.id, { status, last_error: result.ok ? null : result.reason });
             await store.flush();
             const { vault_ref, ...safe } = store.one('platform_accounts', (a) => a.id === acc.id);
             return send(res, 200, { account: safe, verify: result });
