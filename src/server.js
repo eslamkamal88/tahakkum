@@ -290,7 +290,7 @@ const server = http.createServer(async (req, res) => {
             if (!login.ok) return send(res, 200, { login });
             const t = login.session.authToken;
             const out = { login: { ok: true }, probes: {} };
-            for (const u of ['/publicorders/v1/orders', '/publicorders/v1/orders?from-date-time=2026-01-01T00:00:00Z']) {
+            for (const u of ['/publicorders/api/v1/orders', '/catalog/v1/orders', '/catalog/v1/merchant/orders', '/publicorders/v2/orders', '/publicorders/v1/orders/']) {
                 try {
                     const r = await fetch('https://app.toyou.delivery' + u, { headers: { Accept: 'application/json', Authorization: 'Bearer ' + t } });
                     const txt = await r.text();
