@@ -17,6 +17,12 @@ export function startScheduler(store, log = console.log) {
             kind: 'orders', started_at: new Date().toISOString(), status: 'running',
         });
         const result = await connector.fetchOrders(acc, { readSecret });
+        if (!result.ok && /_not_mapped$/.test(result.reason || '')) {
+            // Endpoint not mapped yet for this connector: not an account failure.
+            store.update('sync_jobs', job.id, { status: 'skipped', error: result.reason, finished_at: new Date().toISOString() });
+            await store.flush();
+            return;
+        }
         if (result.ok) {
             for (const o of result.orders) store.insert('orders', { ...o, brand_id: acc.brand_id, platform: acc.platform });
             store.update('platform_accounts', acc.id, { status: 'active', consecutive_failures: 0, last_success_at: new Date().toISOString() });
