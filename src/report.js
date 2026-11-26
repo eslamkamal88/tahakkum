@@ -3,8 +3,36 @@
 // RTL paragraphs, so we segment the line into Arabic and non-Arabic runs
 // and reverse the run sequence ourselves before handing it over.
 import PDFDocument from 'pdfkit';
+import fs from 'node:fs';
+import path from 'node:path';
 
-const FONT_PATH = new URL('../fonts/Amiri-Regular.ttf', import.meta.url).pathname;
+// The Amiri TTF ships in the repo under fonts/. If it is missing (the binary
+// could not be uploaded through the GitHub web editor), fetch it once from
+// the upstream project and cache it in the data dir.
+const REPO_FONT = new URL('../fonts/Amiri-Regular.ttf', import.meta.url).pathname;
+const DATA_DIR = process.env.DATA_DIR || new URL('../data', import.meta.url).pathname;
+const CACHED_FONT = path.join(DATA_DIR, 'Amiri-Regular.ttf');
+const FONT_URLS = [
+    'https://raw.githubusercontent.com/aliftype/amiri/main/fonts/Amiri-Regular.ttf',
+    'https://cdn.jsdelivr.net/gh/aliftype/amiri@main/fonts/Amiri-Regular.ttf',
+];
+
+async function ensureFont() {
+    if (fs.existsSync(REPO_FONT)) return REPO_FONT;
+    if (fs.existsSync(CACHED_FONT) && fs.statSync(CACHED_FONT).size > 100000) return CACHED_FONT;
+    for (const url of FONT_URLS) {
+        try {
+            const res = await fetch(url);
+            if (!res.ok) continue;
+            const buf = Buffer.from(await res.arrayBuffer());
+            if (buf.length < 100000 || buf.readUInt32BE(0) !== 0x00010000) continue;
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+            fs.writeFileSync(CACHED_FONT, buf);
+            return CACHED_FONT;
+        } catch { /* try the next mirror */ }
+    }
+    throw new Error('amiri_font_unavailable');
+}
 
 const PLATFORM_AR = { hungerstation: 'هنقرستيشن', jahez: 'جاهز', toyou: 'تويو', keeta: 'كيتا', ninja: 'نينجا', chefz: 'ذا شيفز' };
 
@@ -88,7 +116,8 @@ export function weekSummary(store, brandId, range) {
     return { range, by_platform: byPlatform, totals, cancelled_recent: cancelledRecent };
 }
 
-function buildPdf(brand, summary) {
+async function buildPdf(brand, summary) {
+    const fontPath = await ensureFont();
     return new Promise((resolve, reject) => {
         const doc = new PDFDocument({ size: 'A4', margin: 50 });
         const chunks = [];
@@ -96,7 +125,7 @@ function buildPdf(brand, summary) {
         doc.on('end', () => resolve(Buffer.concat(chunks)));
         doc.on('error', reject);
 
-        doc.registerFont('amiri', FONT_PATH);
+        doc.registerFont('amiri', fontPath);
         doc.font('amiri');
 
         doc.fontSize(22).fillColor('#06302b').text(ar('تحكم: التقرير الأسبوعي'), { align: 'right' });
