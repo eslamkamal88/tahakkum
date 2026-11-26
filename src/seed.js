@@ -36,10 +36,15 @@ export async function seed(store, { quiet } = {}) {
                         status: 'completed', gross, commission_rate: 0.18,
                         net: Math.round(gross * 0.82 * 100) / 100,
                         placed_at: new Date(Date.now() - Math.random() * 86400000).toISOString(),
+                        demo: true,
                     });
                 }
             }
         }
+    }
+    for (const b of demoBrands) {
+        const brand = store.one('brands', (x) => x.key === b.key);
+        if (brand) seedCatalog(store, brand);
     }
     if (!quiet) console.log('[seed] demo brands ready');
     await store.flush();
@@ -49,4 +54,22 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const store = new Store(process.env.DATA_DIR || new URL('../data', import.meta.url).pathname);
     await store.init();
     await seed(store);
+}
+
+// Starter menu + offers for a brand. Used by the demo seed and by merchant
+// self-service brand creation so new pages are never empty shells.
+export function seedCatalog(store, brand) {
+    if (store.find('menu_items', (m) => m.brand_id === brand.id).length === 0) {
+        const items = [
+            ['وجبة الدجاج المشوي', 32], ['وجبة اللحم', 41], ['صحن مقبلات مشكل', 18],
+            ['برجر كلاسيك', 24], ['بطاطس كبيرة', 9], ['مشروب غازي', 6], ['حلا اليوم', 14],
+        ];
+        for (const [name_ar, price] of items) {
+            store.insert('menu_items', { brand_id: brand.id, name_ar, price, available: true, demo: true });
+        }
+    }
+    if (store.find('offers', (o) => o.brand_id === brand.id).length === 0) {
+        store.insert('offers', { brand_id: brand.id, title_ar: 'خصم نهاية الأسبوع', discount_pct: 15, active: true, demo: true });
+        store.insert('offers', { brand_id: brand.id, title_ar: 'وجبة مجانية مع طلبين', discount_pct: 0, active: false, demo: true });
+    }
 }
