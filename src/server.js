@@ -1,0 +1,157 @@
+// Tahakkum API + static host. Node stdlib only (no npm install needed for the skeleton).
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { Store } from './store.js';
+import { encryptSecret, decryptSecret, hashPassword, verifyPassword, randomToken } from './vault.js';
+import { seed } from './seed.js';
+import { startScheduler } from './scheduler.js';
+import { PLATFORMS, getConnector } from './connectors/index.js';
+
+const DATA_DIR = process.env.DATA_DIR || new URL('../data', import.meta.url).pathname;
+const PORT = Number(process.env.PORT || 8080);
+const PUBLIC_DIR = new URL('../public', import.meta.url).pathname;
+
+const store = new Store(DATA_DIR);
+await store.init();
+await seed(store, { quiet: true });
+const scheduler = startScheduler(store);
+
+function parseCookies(req) {
+    return Object.fromEntries((req.headers.cookie || '').split(';').filter(Boolean).map((c) => {
+        const i = c.indexOf('=');
+        return [c.slice(0, i).trim(), decodeURIComponent(c.slice(i + 1).trim())];
+    }));
+}
+
+function currentUser(req) {
+    const token = parseCookies(req).th_session;
+    if (!token) return null;
+    const session = store.one('sessions', (s) => s.token === token && new Date(s.expires_at) > new Date());
+    if (!session) return null;
+    return store.one('users', (u) => u.id === session.user_id);
+}
+
+function send(res, code, body, headers = {}) {
+    const payload = typeof body === 'string' ? body : JSON.stringify(body);
+    res.writeHead(code, { 'content-type': typeof body === 'string' ? 'text/plain; charset=utf-8' : 'application/json; charset=utf-8', ...headers });
+    res.end(payload);
+}
+
+async function readBody(req) {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    if (raw.length > 1e6) throw new Error('body too large');
+    return raw ? JSON.parse(raw) : {};
+}
+
+function brandDashboard(brandId) {
+    const orders = store.find('orders', (o) => o.brand_id === brandId);
+    const today = orders.filter((o) => Date.now() - new Date(o.placed_at) < 86400000);
+    const byPlatform = {};
+    for (const p of PLATFORMS) {
+        const po = today.filter((o) => o.platform === p);
+        byPlatform[p] = { orders: po.length, gross: Math.round(po.reduce((s, o) => s + o.gross, 0) * 100) / 100 };
+    }
+    return {
+        today_orders: today.length,
+        today_gross: Math.round(today.reduce((s, o) => s + o.gross, 0) * 100) / 100,
+        today_net: Math.round(today.reduce((s, o) => s + o.net, 0) * 100) / 100,
+        by_platform: byPlatform,
+        menu: store.find('menu_items', (m) => m.brand_id === brandId),
+    };
+}
+
+const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url, 'http://x');
+    const user = currentUser(req);
+    try {
+        if (url.pathname === '/api/login' && req.method === 'POST') {
+            const { email, password } = await readBody(req);
+            const u = store.one('users', (x) => x.email === String(email || '').toLowerCase());
+            if (!u || !verifyPassword(password || '', u.password_hash)) return send(res, 401, { error: 'invalid_credentials' });
+            const token = randomToken();
+            store.insert('sessions', { token, user_id: u.id, expires_at: new Date(Date.now() + 30 * 86400000).toISOString() });
+            await store.flush();
+            return send(res, 200, { ok: true, role: u.role }, { 'set-cookie': `th_session=${token}; HttpOnly; Path=/; Max-Age=${30 * 86400}; SameSite=Lax` });
+        }
+        if (url.pathname === '/api/logout' && req.method === 'POST') {
+            const token = parseCookies(req).th_session;
+            if (token) { store.remove('sessions', (s) => s.token === token); await store.flush(); }
+            return send(res, 200, { ok: true }, { 'set-cookie': 'th_session=; HttpOnly; Path=/; Max-Age=0' });
+        }
+        if (!url.pathname.startsWith('/api/')) {
+            const file = path.join(PUBLIC_DIR, url.pathname === '/' ? 'index.html' : url.pathname);
+            if (file.startsWith(PUBLIC_DIR) && fs.existsSync(file) && fs.statSync(file).isFile()) {
+                return send(res, 200, fs.readFileSync(file, 'utf8'), { 'content-type': 'text/html; charset=utf-8' });
+            }
+            return send(res, 404, { error: 'not_found' });
+        }
+        if (!user) return send(res, 401, { error: 'auth_required' });
+
+        if (url.pathname === '/api/me') return send(res, 200, { email: user.email, role: user.role, name: user.name });
+
+        if (url.pathname === '/api/brands') {
+            const brands = user.role === 'owner' ? store.data.brands : store.find('brands', (b) => b.tenant_id === user.id);
+            return send(res, 200, { brands });
+        }
+
+        // Merchant onboarding: owner creates a merchant login tied to a new brand.
+        if (url.pathname === '/api/admin/merchants' && req.method === 'POST' && user.role === 'owner') {
+            const { email, password, name, brand_ar, brand_en } = await readBody(req);
+            if (!email || !password || String(password).length < 8) return send(res, 400, { error: 'email_and_password_min8_required' });
+            if (store.one('users', (u) => u.email === String(email).toLowerCase())) return send(res, 409, { error: 'email_exists' });
+            const merchant = store.insert('users', { email: String(email).toLowerCase(), password_hash: hashPassword(password), role: 'merchant', name: name || '' });
+            const brand = store.insert('brands', { key: 'brand_' + merchant.id.slice(-6), name_ar: brand_ar || (name || 'براند'), name_en: brand_en || (name || 'Brand'), factor: 1, tenant_id: merchant.id });
+            store.insert('audit_log', { actor: user.email, action: 'merchant_created', merchant: merchant.email, brand_id: brand.id });
+            await store.flush();
+            return send(res, 200, { merchant: { id: merchant.id, email: merchant.email, role: 'merchant' }, brand });
+        }
+
+        const canAccess = (brandId) => {
+            const b = store.one('brands', (x) => x.id === brandId);
+            return b && (user.role === 'owner' || b.tenant_id === user.id) ? b : null;
+        };
+
+        const dashMatch = url.pathname.match(/^\/api\/brands\/([^/]+)\/dashboard$/);
+        if (dashMatch) {
+            if (!canAccess(dashMatch[1])) return send(res, 403, { error: 'forbidden' });
+            return send(res, 200, brandDashboard(dashMatch[1]));
+        }
+
+        const accMatch = url.pathname.match(/^\/api\/brands\/([^/]+)\/platform-accounts$/);
+        if (accMatch && !canAccess(accMatch[1])) return send(res, 403, { error: 'forbidden' });
+        if (accMatch && req.method === 'GET') {
+            const accounts = store.find('platform_accounts', (a) => a.brand_id === accMatch[1])
+                .map(({ vault_ref, ...safe }) => ({ ...safe, password: '••••••••' }));
+            return send(res, 200, { accounts });
+        }
+        if (accMatch && req.method === 'POST') {
+            const { platform, username, password } = await readBody(req);
+            if (!PLATFORMS.includes(platform) || !username || !password) return send(res, 400, { error: 'bad_request', platforms: PLATFORMS });
+            const acc = store.insert('platform_accounts', {
+                brand_id: accMatch[1], platform, username: String(username),
+                vault_ref: encryptSecret(password), status: 'pending', consecutive_failures: 0,
+            });
+            store.insert('audit_log', { actor: user.email, action: 'credential_stored', platform, account_id: acc.id });
+            // Verify login asynchronously; stub connectors report not_implemented.
+            const readSecret = async (a) => decryptSecret(a.vault_ref);
+            const result = (await getConnector(platform)).login ? await (await getConnector(platform)).login(acc, { readSecret }) : { ok: false, reason: 'connector_not_implemented' };
+            store.update('platform_accounts', acc.id, { status: result.ok ? 'active' : 'needs_setup', last_error: result.reason });
+            await store.flush();
+            const { vault_ref, ...safe } = store.one('platform_accounts', (a) => a.id === acc.id);
+            return send(res, 200, { account: safe, verify: result });
+        }
+
+        if (url.pathname === '/api/admin/sync-jobs' && user.role === 'owner') {
+            return send(res, 200, { jobs: store.data.sync_jobs.slice(-50).reverse() });
+        }
+
+        return send(res, 404, { error: 'not_found' });
+    } catch (e) {
+        return send(res, 500, { error: 'server_error', detail: String(e.message || e) });
+    }
+});
+
+server.listen(PORT, () => console.log(`[tahakkum] listening on :${PORT}, data dir ${DATA_DIR}`));
+process.on('SIGTERM', () => { scheduler.stop(); server.close(); });

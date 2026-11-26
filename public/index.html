@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>تحكم: بوابة التاجر الموحدة</title>
+<style>
+:root { --ink:#06302b; --ink2:#0a423b; --teal:#0f766e; --gold:#f2b33d; --page:#f7f5ef; --line:#e7e2d6; }
+* { box-sizing: border-box; margin: 0; }
+body { font-family: 'Segoe UI', Tahoma, sans-serif; background: var(--page); color: #2c2620; }
+.wrap { max-width: 720px; margin: 0 auto; padding: 20px 16px 60px; }
+.hero { background: linear-gradient(160deg,#06302b,#0a423b 70%,#0f766e); border-radius: 20px; padding: 34px 22px; text-align: center; color: #fff; margin-bottom: 18px; }
+.hero h1 { font-size: 26px; margin-bottom: 6px; } .hero h1 b { color: var(--gold); }
+.hero p { color: #d7ece7; font-size: 13.5px; line-height: 1.8; }
+.card { background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 18px; margin-bottom: 14px; box-shadow: 0 4px 14px -10px #06302b26; }
+label { display: block; font-size: 12.5px; font-weight: 700; color: var(--ink2); margin: 10px 0 4px; }
+input { width: 100%; border: 1.5px solid var(--line); border-radius: 12px; padding: 11px 13px; font-size: 15px; font-family: inherit; background: #fbfaf7; }
+input:focus { outline: none; border-color: var(--teal); background: #fff; }
+button { background: var(--ink); color: var(--gold); border: none; border-radius: 12px; padding: 12px 18px; font-size: 15px; font-weight: 800; font-family: inherit; cursor: pointer; }
+button:hover { background: var(--ink2); }
+button.ghost { background: transparent; color: var(--ink); border: 1.5px solid var(--line); padding: 8px 14px; font-size: 13px; }
+.err { color: #b3261e; font-size: 12.5px; font-weight: 700; text-align: center; margin-top: 8px; }
+.mast { display: flex; align-items: center; gap: 10px; background: linear-gradient(150deg,#0f766e,#06302b); border-radius: 18px; padding: 14px 18px; color: #fff; margin-bottom: 16px; flex-wrap: wrap; }
+.mast .brand { background: #f2b33d22; border: 1px solid #f2b33d66; color: var(--gold); border-radius: 999px; padding: 5px 14px; font-size: 13px; font-weight: 700; }
+.mast .spacer { flex: 1; }
+.band { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; background: var(--ink); border-radius: 16px; padding: 18px 10px; margin-bottom: 14px; }
+.band div { text-align: center; color: #cfe7e0; font-size: 11.5px; }
+.band b { display: block; color: var(--gold); font-size: 22px; margin-bottom: 4px; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th, td { padding: 9px 8px; text-align: right; border-bottom: 1px solid var(--line); }
+th { color: var(--ink2); font-size: 12px; }
+h2 { font-size: 17px; color: var(--ink); margin: 20px 0 10px; }
+.row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 9px 0; border-bottom: 1px dashed var(--line); font-size: 13.5px; flex-wrap: wrap; }
+.status { font-size: 11.5px; font-weight: 700; border-radius: 999px; padding: 3px 10px; }
+.status.active { background: #e3f3e9; color: #1e7b45; } .status.pending, .status.needs_setup { background: #fdf0d3; color: #8a5f10; } .status.broken, .status.needs_2fa { background: #fbe3e1; color: #b3261e; }
+.foot { text-align: center; font-size: 11.5px; color: #8a8578; margin-top: 26px; }
+.hidden { display: none; }
+.conn-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.chiprow { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.chip { border: 1.5px solid var(--line); background: #fff; color: var(--ink); border-radius: 999px; padding: 7px 16px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.chip.on { background: var(--ink); color: var(--gold); border-color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div id="loginView">
+    <div class="hero"><h1>تَحكُّم <b>بوابة التاجر</b></h1><p>دخول آمن لحسابك: أرقامك وطلباتك ومنيوك في مكان واحد.</p></div>
+    <div class="card">
+      <label>البريد الإلكتروني</label><input id="loginEmail" autocomplete="username">
+      <label>كلمة المرور</label><input id="loginPass" type="password" autocomplete="current-password">
+      <div style="margin-top:14px"><button id="loginBtn" style="width:100%">دخول</button></div>
+      <div class="err hidden" id="loginErr">بيانات الدخول غير صحيحة.</div>
+    </div>
+  </div>
+
+  <div id="appView" class="hidden">
+    <div class="mast"><b>تَحكُّم</b><span class="brand" id="mastBrand"></span><span class="spacer"></span><button class="ghost" id="logoutBtn" style="color:#f2b33d;border-color:#f2b33d66">خروج</button></div>
+    <div class="chiprow" id="brandChips"></div>
+    <div class="band">
+      <div><b id="stOrders">-</b>الطلبات اليوم</div>
+      <div><b id="stGross">-</b>مبيعات اليوم (ر.س)</div>
+      <div><b id="stNet">-</b>صافي اليوم (ر.س)</div>
+    </div>
+    <h2>اليوم حسب التطبيق</h2>
+    <div class="card"><table><thead><tr><th>التطبيق</th><th>الطلبات</th><th>المبيعات (ر.س)</th></tr></thead><tbody id="perApp"></tbody></table></div>
+    <h2>ربط بوابات التطبيقات</h2>
+    <div class="card conn-grid" id="connList"></div>
+    <div class="foot">تحكم · بوابة إدارة تطبيقات التوصيل</div>
+  </div>
+
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const PLATFORM_AR = { hungerstation:'هنقرستيشن', jahez:'جاهز', toyou:'تويو', keeta:'كيتا', ninja:'نينجا', chefz:'ذا شيفز' };
+const STATUS_AR = { active:'نشط', pending:'قيد الربط', needs_setup:'يحتاج إعداد', needs_2fa:'يحتاج رمز تحقق', broken:'متوقف' };
+let brands = [], currentBrand = null;
+
+async function api(path, opts = {}) {
+    const r = await fetch(path, { headers: { 'content-type': 'application/json' }, ...opts });
+    if (r.status === 401) { showLogin(); throw new Error('auth'); }
+    return r.json();
+}
+function showLogin() { $('loginView').classList.remove('hidden'); $('appView').classList.add('hidden'); }
+function showApp() { $('loginView').classList.add('hidden'); $('appView').classList.remove('hidden'); }
+
+$('loginBtn').onclick = async () => {
+    $('loginErr').classList.add('hidden');
+    const r = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: $('loginEmail').value.trim().toLowerCase(), password: $('loginPass').value }) });
+    if (!r.ok) return $('loginErr').classList.remove('hidden');
+    await boot();
+};
+$('logoutBtn').onclick = async () => { await fetch('/api/logout', { method: 'POST' }); showLogin(); };
+
+async function boot() {
+    const me = await api('/api/me');
+    const data = await api('/api/brands');
+    brands = data.brands;
+    $('brandChips').innerHTML = '';
+    for (const b of brands) {
+        const c = document.createElement('button');
+        c.className = 'chip'; c.textContent = b.name_ar;
+        c.onclick = () => selectBrand(b.id);
+        c.id = 'chip-' + b.id;
+        $('brandChips').appendChild(c);
+    }
+    showApp();
+    if (brands[0]) selectBrand(brands[0].id);
+}
+
+async function selectBrand(id) {
+    currentBrand = id;
+    const b = brands.find((x) => x.id === id);
+    $('mastBrand').textContent = b.name_ar;
+    for (const x of brands) $('chip-' + x.id).classList.toggle('on', x.id === id);
+    const d = await api(`/api/brands/${id}/dashboard`);
+    $('stOrders').textContent = d.today_orders;
+    $('stGross').textContent = d.today_gross.toLocaleString('en-US');
+    $('stNet').textContent = d.today_net.toLocaleString('en-US');
+    $('perApp').innerHTML = Object.entries(d.by_platform)
+        .map(([p, v]) => `<tr><td>${PLATFORM_AR[p] || p}</td><td>${v.orders}</td><td>${v.gross.toLocaleString('en-US')}</td></tr>`).join('');
+    renderAccounts((await api(`/api/brands/${id}/platform-accounts`)).accounts);
+}
+
+function renderAccounts(accounts) {
+    const byPlatform = Object.fromEntries(accounts.map((a) => [a.platform, a]));
+    $('connList').innerHTML = '';
+    for (const [p, ar] of Object.entries(PLATFORM_AR)) {
+        const acc = byPlatform[p];
+        const div = document.createElement('div');
+        if (acc) {
+            div.className = 'row';
+            div.innerHTML = `<span><b>${ar}</b> · ${acc.username}</span><span class="status ${acc.status}">${STATUS_AR[acc.status] || acc.status}</span>`;
+        } else {
+            div.innerHTML = `<div class="row" style="border:none"><b>${ar}</b></div>
+                <label>اسم المستخدم</label><input id="u-${p}" autocomplete="off">
+                <label>كلمة المرور</label><input id="p-${p}" type="password" autocomplete="off">
+                <div style="margin-top:10px"><button data-p="${p}">ربط ${ar}</button></div>`;
+        }
+        $('connList').appendChild(div);
+    }
+    $('connList').querySelectorAll('button[data-p]').forEach((btn) => btn.onclick = () => connect(btn.dataset.p));
+}
+
+async function connect(platform) {
+    const username = $('u-' + platform).value.trim();
+    const password = $('p-' + platform).value;
+    if (!username || !password) return;
+    const r = await api(`/api/brands/${currentBrand}/platform-accounts`, { method: 'POST', body: JSON.stringify({ platform, username, password }) });
+    renderAccounts((await api(`/api/brands/${currentBrand}/platform-accounts`)).accounts);
+}
+
+(async () => { try { await boot(); } catch { showLogin(); } })();
+</script>
+</body>
+</html>
