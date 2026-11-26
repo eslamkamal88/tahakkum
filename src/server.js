@@ -54,7 +54,9 @@ function brandDashboard(brandId) {
         byPlatform[p] = { orders: po.length, gross: Math.round(po.reduce((s, o) => s + o.gross, 0) * 100) / 100 };
     }
     const all = store.find('orders', (o) => o.brand_id === brandId);
+    const brand = store.one('brands', (b) => b.id === brandId) || {};
     return {
+        commission_rates: brand.commission_rates || {},
         today_orders: today.length,
         today_gross: Math.round(today.reduce((s, o) => s + o.gross, 0) * 100) / 100,
         today_net: Math.round(today.reduce((s, o) => s + o.net, 0) * 100) / 100,
@@ -135,6 +137,24 @@ const server = http.createServer(async (req, res) => {
         if (dashMatch) {
             if (!canAccess(dashMatch[1])) return send(res, 403, { error: 'forbidden' });
             return send(res, 200, brandDashboard(dashMatch[1]));
+        }
+
+        const commMatch = url.pathname.match(/^\/api\/brands\/([^/]+)\/commission$/);
+        if (commMatch && req.method === 'PATCH') {
+            if (!canAccess(commMatch[1])) return send(res, 403, { error: 'forbidden' });
+            const { platform, rate } = await readBody(req);
+            if (!PLATFORMS.includes(platform)) return send(res, 400, { error: 'bad_platform' });
+            const brand = store.one('brands', (b) => b.id === commMatch[1]);
+            const rates = { ...(brand.commission_rates || {}) };
+            if (rate === null || rate === '') delete rates[platform];
+            else {
+                const n = Number(rate);
+                if (!Number.isFinite(n) || n < 0 || n > 100) return send(res, 400, { error: 'bad_rate' });
+                rates[platform] = n;
+            }
+            store.update('brands', brand.id, { commission_rates: rates });
+            await store.flush();
+            return send(res, 200, { commission_rates: rates });
         }
 
         const menuMatch = url.pathname.match(/^\/api\/brands\/([^/]+)\/menu\/([^/]+)$/);
