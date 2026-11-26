@@ -24,7 +24,13 @@ export function startScheduler(store, log = console.log) {
             return;
         }
         if (result.ok) {
-            for (const o of result.orders) store.insert('orders', { ...o, brand_id: acc.brand_id, platform: acc.platform });
+            if (result.orders.length) {
+                store.data.orders = store.data.orders.filter((o) => !(o.brand_id === acc.brand_id && o.platform === acc.platform && o.demo));
+            }
+            for (const o of result.orders) {
+                if (store.find('orders', (x) => x.brand_id === acc.brand_id && x.platform === acc.platform && x.platform_order_id === o.platform_order_id).length) continue;
+                store.insert('orders', { ...o, brand_id: acc.brand_id, platform: acc.platform });
+            }
             store.update('platform_accounts', acc.id, { status: 'active', consecutive_failures: 0, last_success_at: new Date().toISOString() });
             store.update('sync_jobs', job.id, { status: 'done', rows_pulled: result.orders.length, finished_at: new Date().toISOString() });
             await store.flush();
