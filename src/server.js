@@ -51,9 +51,8 @@ function brandDashboard(brandId) {
     const byPlatform = {};
     for (const p of PLATFORMS) {
         const po = today.filter((o) => o.platform === p);
-        byPlatform[p] = { orders: po.length, gross: Math.round(po.reduce((s, o) => s + o.gross, 0) * 100) / 100 };
+        byPlatform[p] = { orders: po.length, gross: Math.round(po.reduce((s, o) => s + o.gross, 0) * 100) / 100, demo: po.length > 0 && po.every((o) => o.demo === true) };
     }
-    const all = store.find('orders', (o) => o.brand_id === brandId);
     const brand = store.one('brands', (b) => b.id === brandId) || {};
     return {
         commission_rates: brand.commission_rates || {},
@@ -63,7 +62,7 @@ function brandDashboard(brandId) {
         by_platform: byPlatform,
         menu: store.find('menu_items', (m) => m.brand_id === brandId),
         offers: store.find('offers', (o) => o.brand_id === brandId),
-        demo: all.length > 0 && all.every((o) => o.demo !== false),
+        demo: today.some((o) => o.demo === true),
     };
 }
 
@@ -241,7 +240,7 @@ const server = http.createServer(async (req, res) => {
                                 pulled++;
                             }
                             // Real data wins: drop the demo orders for this platform.
-                            store.data.orders = store.data.orders.filter((o) => !(o.brand_id === accMatch[1] && o.platform === platform && o.demo));
+                            store.remove('orders', (o) => o.brand_id === accMatch[1] && o.platform === platform && o.demo);
                             store.insert('sync_jobs', { brand_id: accMatch[1], platform, type: 'real_sync', orders: pulled, at: new Date().toISOString() });
                         }
                     }
