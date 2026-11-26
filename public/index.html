@@ -87,6 +87,11 @@ h2 { font-size: 17px; color: var(--ink); margin: 20px 0 10px; }
     <div class="card"><table><thead><tr><th>التطبيق</th><th>الطلبات</th><th>قبل النسبة (ر.س)</th><th>نسبة التطبيق %</th><th>بعد النسبة (ر.س)</th></tr></thead><tbody id="perApp"></tbody><tfoot id="perAppFoot"></tfoot></table></div>
     <h2>رسم المبيعات حسب التطبيق</h2>
     <div class="card" id="salesChart"></div>
+    <h2>التقارير الأسبوعية (PDF)</h2>
+    <div class="card">
+      <div id="reportList"></div>
+      <div style="margin-top:10px"><button class="small" id="reportGen">أنشئ تقرير الأسبوع الماضي الآن</button></div>
+    </div>
     <h2>منتجات مشتركة (كل التطبيقات)</h2>
     <div class="card" id="menuList"></div>
     <h2>العروض</h2>
@@ -172,9 +177,52 @@ async function selectBrand(id) {
     renderAppSections(d, accounts);
     renderInvoice(d);
     renderChart(d);
+    renderReports(id);
     renderSharedMenu(d.menu || []);
     renderOffers(d.offers || []);
 }
+
+function miniChart(series) {
+    const W = 300, H = 70, pad = 4;
+    const max = Math.max(1, ...series.map((s) => s.gross));
+    const bw = Math.floor((W - pad * 2) / series.length) - 4;
+    let bars = '', labels = '';
+    series.forEach((s, i) => {
+        const h = Math.max(s.gross > 0 ? 3 : 1, Math.round((s.gross / max) * (H - 26)));
+        const x = W - pad - (i + 1) * ((W - pad * 2) / series.length) + 2;
+        const y = H - 16 - h;
+        bars += `<rect x="${x}" y="${y}" width="${bw}" height="${h}" rx="2" fill="#0f766e" opacity="${s.gross > 0 ? 1 : 0.25}"/>`;
+        labels += `<text x="${x + bw / 2}" y="${H - 4}" text-anchor="middle" font-size="7" fill="#06302b">${s.day}</text>`;
+    });
+    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:340px;height:auto" role="img" aria-label="مبيعات آخر 7 أيام">${bars}${labels}</svg>`;
+}
+
+async function renderReports(brandId) {
+    const { reports } = await api(`/api/brands/${brandId}/reports`);
+    const el = $('reportList');
+    el.innerHTML = reports.length ? '' : '<div class="mut">لا توجد تقارير بعد. التقرير يتولد آليا كل أسبوع، أو أنشئه الآن من الزر بالأسفل.</div>';
+    for (const r of reports) {
+        const div = document.createElement('div');
+        div.className = 'row';
+        const t = r.summary && r.summary.totals ? r.summary.totals : {};
+        div.innerHTML = `<span>الأسبوع ${r.week_start} إلى ${r.week_end} <span class="mut">· ${t.orders || 0} طلب · ${(t.gross || 0).toLocaleString('en-US')} ر.س · ملغي ${t.cancelled || 0}</span></span>`;
+        const a = document.createElement('a');
+        a.href = `/api/brands/${brandId}/reports/${r.id}/download`;
+        a.textContent = 'تحميل PDF';
+        a.className = 'small';
+        a.style.cssText = 'display:inline-block;padding:6px 14px;background:#0f766e;color:#fff;border-radius:8px;text-decoration:none';
+        div.appendChild(a);
+        el.appendChild(div);
+    }
+}
+
+$('reportGen').onclick = async () => {
+    if (!currentBrand) return;
+    $('reportGen').disabled = true;
+    await api(`/api/brands/${currentBrand}/reports`, { method: 'POST', body: '{}' });
+    $('reportGen').disabled = false;
+    renderReports(currentBrand);
+};
 
 function renderAppSections(d, accounts) {
     const rates = d.commission_rates || {};
@@ -209,6 +257,11 @@ function renderAppSections(d, accounts) {
                 <div><input class="rate" type="number" min="0" max="100" step="0.1" placeholder="%" value="${has ? r : ''}" data-p="${p}" onchange="saveRate(this)">النسبة %</div>
                 <div><b>${after === null ? '-' : after.toLocaleString('en-US', { maximumFractionDigits: 2 })}</b>بعد النسبة</div>
             </div>
+            <div class="subh">مبيعات آخر 7 أيام: <b>${(v.week_gross || 0).toLocaleString('en-US')}</b> ر.س (${v.week_orders || 0} طلب)</div>
+            ${miniChart(v.series || [])}
+            <div class="subh">الطلبات الملغاة (30 يوم)${v.cancelled && v.cancelled.demo ? ' <span class="demobadge">تجريبي</span>' : ''}</div>
+            <div class="mut">${v.cancelled && v.cancelled.count ? `${v.cancelled.count} طلب ملغي بقيمة ${v.cancelled.gross.toLocaleString('en-US')} ر.س` : 'لا توجد طلبات ملغاة.'}</div>
+            ${(v.cancelled && v.cancelled.recent || []).map((c) => `<div class="row"><span>${c.date} · طلب ${c.id}</span><span class="mut">${Number(c.gross).toLocaleString('en-US')} ر.س</span></div>`).join('')}
             <div class="subh">منيو ${ar}</div>
             <div id="menu-${p}"></div>
             <div class="menuadd">
