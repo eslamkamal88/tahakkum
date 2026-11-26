@@ -240,6 +240,8 @@ const server = http.createServer(async (req, res) => {
                                 });
                                 pulled++;
                             }
+                            // Real data wins: drop the demo orders for this platform.
+                            store.data.orders = store.data.orders.filter((o) => !(o.brand_id === accMatch[1] && o.platform === platform && o.demo));
                             store.insert('sync_jobs', { brand_id: accMatch[1], platform, type: 'real_sync', orders: pulled, at: new Date().toISOString() });
                         }
                     }
@@ -290,11 +292,11 @@ const server = http.createServer(async (req, res) => {
             if (!login.ok) return send(res, 200, { login });
             const t = login.session.authToken;
             const out = { login: { ok: true }, probes: {} };
-            for (const u of ['/delivery/v1/merchant/orders', '/delivery/v1/merchant/stat/orders', '/merchantmenu/v1/products']) {
+            for (const u of ['/delivery/v1/merchant/orders']) {
                 try {
                     const r = await fetch('https://app.toyou.delivery' + u, { headers: { Accept: 'application/json', Authorization: 'Bearer ' + t } });
                     const txt = await r.text();
-                    out.probes[u] = { status: r.status, body: txt.slice(0, 300) };
+                    out.probes[u] = { status: r.status, body: txt.slice(0, 1500) };
                 } catch (e) { out.probes[u] = { error: String(e && e.message || e) }; }
             }
             return send(res, 200, out);
