@@ -259,7 +259,7 @@ function renderAppSections(d, accounts) {
             </div>
             <div class="subh">مبيعات آخر 7 أيام: <b>${(v.week_gross || 0).toLocaleString('en-US')}</b> ر.س (${v.week_orders || 0} طلب)</div>
             ${miniChart(v.series || [])}
-            <div class="subh">الطلبات الملغاة (90 يوم)${v.cancelled && v.cancelled.demo ? ' <span class="demobadge">تجريبي</span>' : ''}</div>
+            <div class="subh">الطلبات الملغاة (آخر 6 شهور)${v.cancelled && v.cancelled.demo ? ' <span class="demobadge">تجريبي</span>' : ''}</div>
             <div class="mut">${v.cancelled && v.cancelled.count ? `${v.cancelled.count} طلب ملغي بقيمة ${v.cancelled.gross.toLocaleString('en-US')} ر.س` : 'لا توجد طلبات ملغاة.'}</div>
             ${(v.cancelled && v.cancelled.recent || []).map((c) => `<div class="row"><span>${c.date} · طلب ${c.id}</span><span class="mut">${Number(c.gross).toLocaleString('en-US')} ر.س</span></div>`).join('')}
             <div class="subh">منيو ${ar}</div>
