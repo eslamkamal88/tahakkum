@@ -92,15 +92,23 @@ export function toyouPortal() {
             try { data = await res.json(); } catch { return { ok: false, reason: 'orders_bad_json', orders: [] }; }
             const list = Array.isArray(data) ? data : (data.orders || data.content || data.items || data.data || data.records || []);
             const orders = list.map((o) => {
-                const gross = Number(o.totalPrice ?? o.total ?? o.totalAmount ?? o.amount ?? o.price
+                let gross = Number(o.totalPrice ?? o.total ?? o.totalAmount ?? o.amount ?? o.price
                     ?? o.orderPrice ?? o.finalPrice ?? (o.payment && (o.payment.total ?? o.payment.amount)) ?? 0) || 0;
+                if (!gross && Array.isArray(o.orderLines)) {
+                    gross = o.orderLines.reduce((s, l) => s + (Number(l.price) || 0) * (Number(l.quantity) || 1), 0);
+                    gross = Math.round(gross * 100) / 100;
+                }
+                let placed = o.createdAt || o.createdDate || o.created_at || o.placedAt || o.date;
+                if (!placed && typeof o.requiredDeliveryDate === 'number') {
+                    placed = new Date(o.requiredDeliveryDate * 1000).toISOString();
+                }
                 return {
                     platform_order_id: String(o.id || o.orderId || o.order_id || o.orderNumber || o.code || ''),
                     status: String(o.merchantOrderStatus || o.status || 'unknown').toLowerCase(),
                     gross,
                     commission_rate: 0.18,
                     net: gross * 0.82,
-                    placed_at: o.createdAt || o.createdDate || o.created_at || o.placedAt || o.date || o.requiredDeliveryDate || new Date().toISOString(),
+                    placed_at: placed || new Date().toISOString(),
                     demo: false,
                 };
             }).filter((o) => o.platform_order_id);
