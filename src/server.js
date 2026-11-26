@@ -61,7 +61,7 @@ function brandDashboard(brandId) {
             const thatDay = week.filter((o) => { const t = new Date(o.placed_at); return t >= dayStart && t < dayEnd; });
             series.push({ day: dayStart.toISOString().slice(5, 10), orders: thatDay.length, gross: Math.round(thatDay.reduce((s, o) => s + o.gross, 0) * 100) / 100 });
         }
-        const cancelled = orders.filter((o) => o.platform === p && o.status === 'cancelled' && Date.now() - new Date(o.placed_at) < 30 * 86400000);
+        const cancelled = orders.filter((o) => o.platform === p && o.status === 'cancelled' && Date.now() - new Date(o.placed_at) < 90 * 86400000);
         cancelled.sort((a, b) => String(b.placed_at).localeCompare(String(a.placed_at)));
         byPlatform[p] = {
             orders: po.length,
