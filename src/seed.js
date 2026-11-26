@@ -30,11 +30,12 @@ export async function seed(store, { quiet } = {}) {
                 const n = Math.max(1, Math.round((5 + Math.random() * 10) * b.factor));
                 for (let i = 0; i < n; i++) {
                     const gross = Math.round((30 + Math.random() * 120) * 100) / 100;
+                    const cancelled = i === n - 1 && n >= 3; // one cancelled demo order per platform
                     store.insert('orders', {
                         brand_id: brand.id, platform: p,
                         platform_order_id: `${p}-${Date.now()}-${i}`,
-                        status: 'completed', gross, commission_rate: 0.18,
-                        net: Math.round(gross * 0.82 * 100) / 100,
+                        status: cancelled ? 'cancelled' : 'completed', gross, commission_rate: 0.18,
+                        net: cancelled ? 0 : Math.round(gross * 0.82 * 100) / 100,
                         placed_at: new Date(Date.now() - Math.random() * 86400000).toISOString(),
                         demo: true,
                     });
