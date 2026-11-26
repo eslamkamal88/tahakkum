@@ -97,6 +97,8 @@ async function boot() {
     const me = await api('/api/me');
     const data = await api('/api/brands');
     brands = data.brands;
+    // Merchants get a private single-restaurant page: no brand switcher, no admin list.
+    if (me.role === 'merchant') $('brandChips').classList.add('hidden');
     $('brandChips').innerHTML = '';
     for (const b of brands) {
         const c = document.createElement('button');
