@@ -60,5 +60,15 @@ export async function getConnector(platform) {
         const { toyouApi } = await import('./toyou-api.js');
         return toyouApi();
     }
+    // Credential-based portal pull (default for ToYou and HungerStation).
+    // Set TY_PORTAL=0 / HS_PORTAL=0 to fall back to the stub.
+    if (platform === 'toyou' && process.env.TY_PORTAL !== '0') {
+        const { toyouPortal } = await import('./toyou-portal.js');
+        return toyouPortal();
+    }
+    if (platform === 'hungerstation' && process.env.HS_PORTAL !== '0') {
+        const { hungerstationPortal } = await import('./hs-portal.js');
+        return hungerstationPortal();
+    }
     return stub(platform);
 }
