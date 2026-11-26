@@ -91,15 +91,19 @@ export function toyouPortal() {
             let data;
             try { data = await res.json(); } catch { return { ok: false, reason: 'orders_bad_json', orders: [] }; }
             const list = Array.isArray(data) ? data : (data.orders || data.content || data.items || data.data || data.records || []);
-            const orders = list.map((o) => ({
-                platform_order_id: String(o.id || o.orderId || o.order_id || o.code || ''),
-                status: String(o.status || 'unknown').toLowerCase(),
-                gross: Number(o.total ?? o.totalAmount ?? o.price ?? o.amount ?? 0) || 0,
-                commission_rate: 0.18,
-                net: (Number(o.total ?? o.totalAmount ?? o.price ?? o.amount ?? 0) || 0) * 0.82,
-                placed_at: o.createdAt || o.created_at || o.date || new Date().toISOString(),
-                demo: false,
-            })).filter((o) => o.platform_order_id);
+            const orders = list.map((o) => {
+                const gross = Number(o.totalPrice ?? o.total ?? o.totalAmount ?? o.amount ?? o.price
+                    ?? o.orderPrice ?? o.finalPrice ?? (o.payment && (o.payment.total ?? o.payment.amount)) ?? 0) || 0;
+                return {
+                    platform_order_id: String(o.id || o.orderId || o.order_id || o.orderNumber || o.code || ''),
+                    status: String(o.merchantOrderStatus || o.status || 'unknown').toLowerCase(),
+                    gross,
+                    commission_rate: 0.18,
+                    net: gross * 0.82,
+                    placed_at: o.createdAt || o.createdDate || o.created_at || o.placedAt || o.date || o.requiredDeliveryDate || new Date().toISOString(),
+                    demo: false,
+                };
+            }).filter((o) => o.platform_order_id);
             return { ok: true, orders };
         },
 
