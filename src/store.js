@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createClient } from '@libsql/client';
 
-const COLLECTIONS = ['users', 'brands', 'platform_accounts', 'orders', 'order_items', 'menu_items', 'offers', 'payouts', 'ratings', 'sessions', 'sync_jobs', 'audit_log'];
+const COLLECTIONS = ['users', 'brands', 'platform_accounts', 'orders', 'order_items', 'menu_items', 'offers', 'payouts', 'ratings', 'sessions', 'sync_jobs', 'audit_log', 'reports'];
 
 export class Store {
     constructor(dir) {
