@@ -36,6 +36,7 @@ th { color: var(--ink2); font-size: 12px; }
 h2 { font-size: 17px; color: var(--ink); margin: 20px 0 10px; }
 .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 9px 0; border-bottom: 1px dashed var(--line); font-size: 13.5px; flex-wrap: wrap; }
 .status { font-size: 11.5px; font-weight: 700; border-radius: 999px; padding: 3px 10px; }
+.demobadge { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 3px 10px; background: #fdf0d3; color: #8a5f10; border: 1px solid #f2b33d55; margin-right: 6px; }
 .status.active { background: #e3f3e9; color: #1e7b45; } .status.pending, .status.needs_setup { background: #fdf0d3; color: #8a5f10; } .status.broken, .status.needs_2fa { background: #fbe3e1; color: #b3261e; }
 .foot { text-align: center; font-size: 11.5px; color: #8a8578; margin-top: 26px; }
 .hidden { display: none; }
@@ -74,7 +75,7 @@ h2 { font-size: 17px; color: var(--ink); margin: 20px 0 10px; }
   <div id="appView" class="hidden">
     <div class="mast"><b>تَحكُّم</b><span class="brand" id="mastBrand"></span><span class="spacer"></span><button class="ghost" id="logoutBtn" style="color:#f2b33d;border-color:#f2b33d66">خروج</button></div>
     <div class="chiprow" id="brandChips"></div>
-    <div class="demonote hidden" id="demoNote">الأرقام المعروضة تجريبية لتوضيح شكل اللوحة. الأرقام الحقيقية تظهر بعد اعتماد الربط الرسمي مع التطبيقات.</div>
+    <div class="demonote hidden" id="demoNote">الأقسام الموسومة بتجريبي تعرض أرقاما توضيحية لحين اكتمال ربطها الحقيقي. سحب الطلبات الحقيقي يعمل حاليا مع تويو.</div>
     <div class="band">
       <div><b id="stOrders">-</b>الطلبات اليوم</div>
       <div><b id="stGross">-</b>مبيعات اليوم (ر.س)</div>
@@ -104,7 +105,7 @@ h2 { font-size: 17px; color: var(--ink); margin: 20px 0 10px; }
 <script>
 const $ = (id) => document.getElementById(id);
 const PLATFORM_AR = { hungerstation:'هنقرستيشن', jahez:'جاهز', toyou:'تويو', keeta:'كيتا', ninja:'نينجا', chefz:'ذا شيفز' };
-const STATUS_AR = { active:'نشط', pending:'قيد الربط', needs_setup:'يحتاج إعداد', needs_2fa:'يحتاج رمز تحقق', broken:'متوقف' };
+const STATUS_AR = { active:'نشط', pending:'قيد الربط', needs_setup:'يحتاج إعداد', needs_2fa:'يحتاج رمز تحقق', broken:'متوقف', invalid_credentials:'بيانات الدخول غير صحيحة' };
 let brands = [], currentBrand = null, meRole = 'merchant';
 
 async function api(path, opts = {}) {
@@ -200,7 +201,7 @@ function renderAppSections(d, accounts) {
                 <button class="small" data-p="${p}">ربط</button></div>`;
         }
         card.innerHTML = `
-            <div class="apphead"><b>${ar}</b>${acc ? credHtml : ''}<span class="spacer" style="flex:1"></span></div>
+            <div class="apphead"><b>${ar}</b>${v.demo ? '<span class="demobadge">تجريبي</span>' : ''}${acc ? credHtml : ''}<span class="spacer" style="flex:1"></span></div>
             ${acc ? '' : credHtml}
             <div class="ministats">
                 <div><b>${v.orders}</b>الطلبات</div>
@@ -264,7 +265,7 @@ function renderInvoice(d) {
         const has = r !== undefined && r !== null && r !== '';
         let after = '<span class="mut">-</span>';
         if (has) { const a = v.gross * (1 - Number(r) / 100); tNet += a; tNetKnown = true; after = a.toLocaleString('en-US', { maximumFractionDigits: 2 }); }
-        return `<tr><td>${PLATFORM_AR[p] || p}</td><td>${v.orders}</td><td>${v.gross.toLocaleString('en-US')}</td>` +
+        return `<tr><td>${PLATFORM_AR[p] || p}${v.demo ? ' <span class="demobadge">تجريبي</span>' : ''}</td><td>${v.orders}</td><td>${v.gross.toLocaleString('en-US')}</td>` +
             `<td><input class="rate" type="number" min="0" max="100" step="0.1" placeholder="%" value="${has ? r : ''}" data-p="${p}" onchange="saveRate(this)"></td>` +
             `<td>${after}</td></tr>`;
     }).join('');
