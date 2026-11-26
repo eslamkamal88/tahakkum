@@ -13,8 +13,5 @@
   },
   "dependencies": {
     "@libsql/client": "^0.18.0"
-  },
-  "optionalDependencies": {
-    "playwright": "^1.48.0"
   }
 }
