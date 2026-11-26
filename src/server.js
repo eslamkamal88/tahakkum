@@ -7,6 +7,7 @@ import { encryptSecret, decryptSecret, hashPassword, verifyPassword, randomToken
 import { seed, seedCatalog } from './seed.js';
 import { startScheduler } from './scheduler.js';
 import { PLATFORMS, getConnector } from './connectors/index.js';
+import { generateWeeklyReport, previousWeekRange } from './report.js';
 
 const DATA_DIR = process.env.DATA_DIR || new URL('../data', import.meta.url).pathname;
 const PORT = Number(process.env.PORT || 8080);
@@ -50,15 +51,40 @@ function brandDashboard(brandId) {
     const today = orders.filter((o) => Date.now() - new Date(o.placed_at) < 86400000);
     const byPlatform = {};
     for (const p of PLATFORMS) {
-        const po = today.filter((o) => o.platform === p);
-        byPlatform[p] = { orders: po.length, gross: Math.round(po.reduce((s, o) => s + o.gross, 0) * 100) / 100, demo: po.length > 0 && po.every((o) => o.demo === true) };
+        const po = today.filter((o) => o.platform === p && o.status !== 'cancelled');
+        const week = orders.filter((o) => o.platform === p && o.status !== 'cancelled' && Date.now() - new Date(o.placed_at) < 7 * 86400000);
+        // Daily series for the last 7 days (oldest first) for the per-app chart.
+        const series = [];
+        for (let i = 6; i >= 0; i--) {
+            const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0); dayStart.setDate(dayStart.getDate() - i);
+            const dayEnd = new Date(dayStart.getTime() + 86400000);
+            const thatDay = week.filter((o) => { const t = new Date(o.placed_at); return t >= dayStart && t < dayEnd; });
+            series.push({ day: dayStart.toISOString().slice(5, 10), orders: thatDay.length, gross: Math.round(thatDay.reduce((s, o) => s + o.gross, 0) * 100) / 100 });
+        }
+        const cancelled = orders.filter((o) => o.platform === p && o.status === 'cancelled' && Date.now() - new Date(o.placed_at) < 30 * 86400000);
+        cancelled.sort((a, b) => String(b.placed_at).localeCompare(String(a.placed_at)));
+        byPlatform[p] = {
+            orders: po.length,
+            gross: Math.round(po.reduce((s, o) => s + o.gross, 0) * 100) / 100,
+            demo: po.length > 0 && po.every((o) => o.demo === true),
+            week_orders: week.length,
+            week_gross: Math.round(week.reduce((s, o) => s + o.gross, 0) * 100) / 100,
+            series,
+            cancelled: {
+                count: cancelled.length,
+                gross: Math.round(cancelled.reduce((s, o) => s + o.gross, 0) * 100) / 100,
+                demo: cancelled.length > 0 && cancelled.every((o) => o.demo === true),
+                recent: cancelled.slice(0, 5).map((o) => ({ id: o.platform_order_id, gross: o.gross, date: String(o.placed_at).slice(0, 10) })),
+            },
+        };
     }
     const brand = store.one('brands', (b) => b.id === brandId) || {};
     return {
         commission_rates: brand.commission_rates || {},
-        today_orders: today.length,
-        today_gross: Math.round(today.reduce((s, o) => s + o.gross, 0) * 100) / 100,
-        today_net: Math.round(today.reduce((s, o) => s + o.net, 0) * 100) / 100,
+        today_orders: today.filter((o) => o.status !== 'cancelled').length,
+        today_gross: Math.round(today.filter((o) => o.status !== 'cancelled').reduce((s, o) => s + o.gross, 0) * 100) / 100,
+        today_net: Math.round(today.filter((o) => o.status !== 'cancelled').reduce((s, o) => s + o.net, 0) * 100) / 100,
+        today_cancelled: today.filter((o) => o.status === 'cancelled').length,
         by_platform: byPlatform,
         menu: store.find('menu_items', (m) => m.brand_id === brandId),
         offers: store.find('offers', (o) => o.brand_id === brandId),
@@ -136,6 +162,36 @@ const server = http.createServer(async (req, res) => {
         if (dashMatch) {
             if (!canAccess(dashMatch[1])) return send(res, 403, { error: 'forbidden' });
             return send(res, 200, brandDashboard(dashMatch[1]));
+        }
+
+        // Weekly reports: list, generate on demand, download.
+        const reportsMatch = url.pathname.match(/^\/api\/brands\/([^/]+)\/reports$/);
+        if (reportsMatch && req.method === 'GET') {
+            if (!canAccess(reportsMatch[1])) return send(res, 403, { error: 'forbidden' });
+            const reports = store.find('reports', (r) => r.brand_id === reportsMatch[1])
+                .sort((a, b) => String(b.week_start).localeCompare(String(a.week_start)))
+                .map(({ pdf_base64, ...meta }) => meta);
+            return send(res, 200, { reports });
+        }
+        if (reportsMatch && req.method === 'POST') {
+            const brand = canAccess(reportsMatch[1]);
+            if (!brand) return send(res, 403, { error: 'forbidden' });
+            const report = await generateWeeklyReport(store, brand, previousWeekRange());
+            const { pdf_base64, ...meta } = report;
+            return send(res, 200, { report: meta });
+        }
+        const reportDlMatch = url.pathname.match(/^\/api\/brands\/([^/]+)\/reports\/([^/]+)\/download$/);
+        if (reportDlMatch && req.method === 'GET') {
+            if (!canAccess(reportDlMatch[1])) return send(res, 403, { error: 'forbidden' });
+            const report = store.one('reports', (r) => r.id === reportDlMatch[2] && r.brand_id === reportDlMatch[1]);
+            if (!report) return send(res, 404, { error: 'not_found' });
+            const pdf = Buffer.from(report.pdf_base64, 'base64');
+            res.writeHead(200, {
+                'content-type': 'application/pdf',
+                'content-length': pdf.length,
+                'content-disposition': `attachment; filename="tahakkum-${report.week_start}.pdf"`,
+            });
+            return res.end(pdf);
         }
 
         const commMatch = url.pathname.match(/^\/api\/brands\/([^/]+)\/commission$/);
@@ -257,11 +313,12 @@ const server = http.createServer(async (req, res) => {
                 const n = 3 + Math.floor(Math.random() * 6);
                 for (let i = 0; i < n; i++) {
                     const gross = Math.round((30 + Math.random() * 120) * 100) / 100;
+                    const cancelled = i === n - 1 && n >= 3; // one cancelled demo order per platform
                     store.insert('orders', {
                         brand_id: accMatch[1], platform,
                         platform_order_id: `${platform}-${Date.now()}-${i}`,
-                        status: 'completed', gross, commission_rate: 0.18,
-                        net: Math.round(gross * 0.82 * 100) / 100,
+                        status: cancelled ? 'cancelled' : 'completed', gross, commission_rate: 0.18,
+                        net: cancelled ? 0 : Math.round(gross * 0.82 * 100) / 100,
                         placed_at: new Date(Date.now() - Math.random() * 43200000).toISOString(),
                         demo: true,
                     });
