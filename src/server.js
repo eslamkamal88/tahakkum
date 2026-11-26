@@ -157,6 +157,20 @@ const server = http.createServer(async (req, res) => {
             return send(res, 200, { commission_rates: rates });
         }
 
+        const menuAddMatch = url.pathname.match(/^\/api\/brands\/([^/]+)\/menu$/);
+        if (menuAddMatch && req.method === 'POST') {
+            if (!canAccess(menuAddMatch[1])) return send(res, 403, { error: 'forbidden' });
+            const { name_ar, price, platform } = await readBody(req);
+            if (!name_ar || !PLATFORMS.includes(platform)) return send(res, 400, { error: 'name_and_platform_required', platforms: PLATFORMS });
+            const item = store.insert('menu_items', {
+                brand_id: menuAddMatch[1], platform,
+                name_ar: String(name_ar), price: Number(price) || 0,
+                available: true, demo: true,
+            });
+            await store.flush();
+            return send(res, 200, { item });
+        }
+
         const menuMatch = url.pathname.match(/^\/api\/brands\/([^/]+)\/menu\/([^/]+)$/);
         if (menuMatch && req.method === 'PATCH') {
             if (!canAccess(menuMatch[1])) return send(res, 403, { error: 'forbidden' });
