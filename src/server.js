@@ -279,29 +279,6 @@ const server = http.createServer(async (req, res) => {
             return send(res, 200, { account: safe, verify: result });
         }
 
-        // Temporary owner-only diagnostics for the ToYou connector: performs a
-        // fresh login with the merchant's stored credential and probes the
-        // orders endpoint, returning HTTP statuses and a short body snippet.
-        // Never returns tokens or passwords. Remove once mapping is confirmed.
-        if (url.pathname === '/api/admin/toyou-probe' && user.role === 'owner') {
-            const acc = store.find('platform_accounts', (a) => a.platform === 'toyou' && a.status === 'active')[0];
-            if (!acc) return send(res, 200, { note: 'no active toyou account' });
-            const readSecret = async (a) => decryptSecret(a.vault_ref);
-            const connector = await getConnector('toyou');
-            const login = await connector.login(acc, { readSecret });
-            if (!login.ok) return send(res, 200, { login });
-            const t = login.session.authToken;
-            const out = { login: { ok: true }, probes: {} };
-            for (const u of ['/delivery/v1/merchant/orders']) {
-                try {
-                    const r = await fetch('https://app.toyou.delivery' + u, { headers: { Accept: 'application/json', Authorization: 'Bearer ' + t } });
-                    const txt = await r.text();
-                    out.probes[u] = { status: r.status, body: txt.slice(0, 1500) };
-                } catch (e) { out.probes[u] = { error: String(e && e.message || e) }; }
-            }
-            return send(res, 200, out);
-        }
-
         if (url.pathname === '/api/admin/sync-jobs' && user.role === 'owner') {
             return send(res, 200, { jobs: store.data.sync_jobs.slice(-50).reverse() });
         }
