@@ -4,6 +4,7 @@
 // owner dashboard).
 import { getConnector } from './connectors/index.js';
 import { decryptSecret } from './vault.js';
+import { generateWeeklyReport, previousWeekRange } from './report.js';
 
 const ORDERS_INTERVAL_MS = 10 * 60 * 1000;   // orders every 10 minutes
 const MAX_CONSECUTIVE_FAILURES = 3;
@@ -49,6 +50,29 @@ export function startScheduler(store, log = console.log) {
     async function tick() {
         const accounts = store.find('platform_accounts', (a) => a.status === 'active' || a.status === 'pending');
         for (const acc of accounts) await syncAccount(acc);
+        await weeklyReports();
+    }
+
+    // Weekly PDF: once the previous ISO week has a report missing for a brand
+    // that had any orders that week, generate it. Idempotent: existing reports
+    // are skipped, so this is safe to run on every tick.
+    async function weeklyReports() {
+        try {
+            const range = previousWeekRange();
+            for (const brand of store.data.brands) {
+                if (store.one('reports', (r) => r.brand_id === brand.id && r.week_start === range.start && r.week_end === range.end)) continue;
+                const hasOrders = store.find('orders', (o) => {
+                    if (o.brand_id !== brand.id) return false;
+                    const d = String(o.placed_at).slice(0, 10);
+                    return d >= range.start && d <= range.end;
+                }).length > 0;
+                if (!hasOrders) continue;
+                await generateWeeklyReport(store, brand, range);
+                log(`[report] weekly report generated for brand ${brand.id} (${range.start}..${range.end})`);
+            }
+        } catch (e) {
+            log(`[report] weekly report generation failed: ${e.message || e}`);
+        }
     }
 
     const timer = setInterval(tick, ORDERS_INTERVAL_MS);
