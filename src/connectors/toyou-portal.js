@@ -73,19 +73,24 @@ export function toyouPortal() {
                 session = r.session;
             }
             if (!session || !session.authToken) return { ok: false, reason: 'no_session', orders: [] };
-            let res;
-            try {
-                res = await fetch(`${HOST}/publicorders/v1/orders?size=50`, {
-                    headers: { Accept: 'application/json', Authorization: `Bearer ${session.authToken}` },
-                });
-            } catch (e) {
-                return { ok: false, reason: 'portal_unreachable', orders: [] };
+            // The merchant portal's own endpoints (from its JS bundle): orders
+            // live under /delivery/v1/merchant/orders. The public integration
+            // path /publicorders/v1/orders is kept as a fallback.
+            let res = null, used = '';
+            for (const u of [`${HOST}/delivery/v1/merchant/orders`, `${HOST}/publicorders/v1/orders`]) {
+                try {
+                    res = await fetch(u, { headers: { Accept: 'application/json', Authorization: `Bearer ${session.authToken}` } });
+                    used = u;
+                } catch (e) {
+                    return { ok: false, reason: 'portal_unreachable', orders: [] };
+                }
+                if (res.ok) break;
             }
-            if (res.status === 401 || res.status === 403) return { ok: false, reason: 'session_expired', orders: [] };
+            if (res.status === 401) return { ok: false, reason: 'session_expired', orders: [] };
             if (!res.ok) return { ok: false, reason: `orders_http_${res.status}`, orders: [] };
             let data;
             try { data = await res.json(); } catch { return { ok: false, reason: 'orders_bad_json', orders: [] }; }
-            const list = Array.isArray(data) ? data : (data.orders || data.content || data.items || []);
+            const list = Array.isArray(data) ? data : (data.orders || data.content || data.items || data.data || data.records || []);
             const orders = list.map((o) => ({
                 platform_order_id: String(o.id || o.orderId || o.order_id || o.code || ''),
                 status: String(o.status || 'unknown').toLowerCase(),
