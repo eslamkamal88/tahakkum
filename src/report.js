@@ -152,9 +152,15 @@ async function buildPdf(brand, summary) {
                 }
             }
             groups.reverse();
+            // pdfkit mirrors bracket glyphs in Arabic runs; pre-swap them so
+            // the rendered pair reads in typing order (opening curve first
+            // for the RTL reader).
+            const mirror = (w) => /[\u0600-\u06FF]/.test(w)
+                ? w.replace(/[()\[\]{}]/g, (b) => ({ '(': ')', ')': '(', '[': ']', ']': '[', '{': '}', '}': '{' }[b]))
+                : w;
             // Double spaces: pdfkit drops some single spaces around
             // Latin/digit tokens; doubles survive and look uniform.
-            return groups.map((g) => g.words.join(' ')).join('  ') + ' ';
+            return groups.map((g) => g.words.map(mirror).join(' ')).join('  ') + ' ';
         }
 
         function line(text, { size = 11, color = '#000000', y } = {}) {
