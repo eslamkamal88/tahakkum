@@ -19,6 +19,9 @@ input:focus { outline: none; border-color: var(--teal); background: #fff; }
 button { background: var(--ink); color: var(--gold); border: none; border-radius: 12px; padding: 12px 18px; font-size: 15px; font-weight: 800; font-family: inherit; cursor: pointer; }
 button:hover { background: var(--ink2); }
 button.ghost { background: transparent; color: var(--ink); border: 1.5px solid var(--line); padding: 8px 14px; font-size: 13px; }
+button.small { padding: 7px 14px; font-size: 12.5px; border-radius: 999px; }
+button.off { background: #fbe3e1; color: #b3261e; }
+button.onb { background: #e3f3e9; color: #1e7b45; }
 .err { color: #b3261e; font-size: 12.5px; font-weight: 700; text-align: center; margin-top: 8px; }
 .mast { display: flex; align-items: center; gap: 10px; background: linear-gradient(150deg,#0f766e,#06302b); border-radius: 18px; padding: 14px 18px; color: #fff; margin-bottom: 16px; flex-wrap: wrap; }
 .mast .brand { background: #f2b33d22; border: 1px solid #f2b33d66; color: var(--gold); border-radius: 999px; padding: 5px 14px; font-size: 13px; font-weight: 700; }
@@ -39,6 +42,12 @@ h2 { font-size: 17px; color: var(--ink); margin: 20px 0 10px; }
 .chiprow { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .chip { border: 1.5px solid var(--line); background: #fff; color: var(--ink); border-radius: 999px; padding: 7px 16px; font-size: 13px; font-weight: 700; cursor: pointer; }
 .chip.on { background: var(--ink); color: var(--gold); border-color: var(--ink); }
+.chip.add { border-style: dashed; color: var(--teal); border-color: var(--teal); }
+.demonote { background: #fdf6e3; border: 1px solid #f2b33d55; color: #8a5f10; border-radius: 12px; padding: 8px 14px; font-size: 12px; font-weight: 700; margin-bottom: 14px; }
+.price { color: var(--ink2); font-weight: 700; }
+.mut { color: #8a8578; font-size: 12px; }
+.inlineform { display: grid; grid-template-columns: 2fr 1fr auto; gap: 8px; margin-top: 10px; align-items: end; }
+.inlineform label { margin: 0 0 4px; }
 </style>
 </head>
 <body>
@@ -47,7 +56,7 @@ h2 { font-size: 17px; color: var(--ink); margin: 20px 0 10px; }
   <div id="loginView">
     <div class="hero"><h1>تَحكُّم <b>بوابة التاجر</b></h1><p>دخول آمن لحسابك: أرقامك وطلباتك ومنيوك في مكان واحد.</p></div>
     <div class="card">
-      <label>البريد الإلكتروني</label><input id="loginEmail" autocomplete="username">
+      <label>البريد الإلكتروني أو اسم المستخدم</label><input id="loginEmail" autocomplete="username">
       <label>كلمة المرور</label><input id="loginPass" type="password" autocomplete="current-password">
       <div style="margin-top:14px"><button id="loginBtn" style="width:100%">دخول</button></div>
       <div class="err hidden" id="loginErr">بيانات الدخول غير صحيحة.</div>
@@ -57,6 +66,7 @@ h2 { font-size: 17px; color: var(--ink); margin: 20px 0 10px; }
   <div id="appView" class="hidden">
     <div class="mast"><b>تَحكُّم</b><span class="brand" id="mastBrand"></span><span class="spacer"></span><button class="ghost" id="logoutBtn" style="color:#f2b33d;border-color:#f2b33d66">خروج</button></div>
     <div class="chiprow" id="brandChips"></div>
+    <div class="demonote hidden" id="demoNote">الأرقام المعروضة تجريبية لتوضيح شكل اللوحة. الأرقام الحقيقية تظهر بعد اعتماد الربط الرسمي مع التطبيقات.</div>
     <div class="band">
       <div><b id="stOrders">-</b>الطلبات اليوم</div>
       <div><b id="stGross">-</b>مبيعات اليوم (ر.س)</div>
@@ -64,6 +74,17 @@ h2 { font-size: 17px; color: var(--ink); margin: 20px 0 10px; }
     </div>
     <h2>اليوم حسب التطبيق</h2>
     <div class="card"><table><thead><tr><th>التطبيق</th><th>الطلبات</th><th>المبيعات (ر.س)</th></tr></thead><tbody id="perApp"></tbody></table></div>
+    <h2>المنيو (قفل وتشغيل المنتجات)</h2>
+    <div class="card" id="menuList"></div>
+    <h2>العروض</h2>
+    <div class="card">
+      <div id="offerList"></div>
+      <div class="inlineform">
+        <div><label>اسم العرض</label><input id="offerTitle"></div>
+        <div><label>خصم %</label><input id="offerPct" type="number" min="0" max="100"></div>
+        <button class="small" id="offerAdd">أضف</button>
+      </div>
+    </div>
     <h2>ربط بوابات التطبيقات</h2>
     <div class="card conn-grid" id="connList"></div>
     <div class="foot">تحكم · بوابة إدارة تطبيقات التوصيل</div>
@@ -74,7 +95,7 @@ h2 { font-size: 17px; color: var(--ink); margin: 20px 0 10px; }
 const $ = (id) => document.getElementById(id);
 const PLATFORM_AR = { hungerstation:'هنقرستيشن', jahez:'جاهز', toyou:'تويو', keeta:'كيتا', ninja:'نينجا', chefz:'ذا شيفز' };
 const STATUS_AR = { active:'نشط', pending:'قيد الربط', needs_setup:'يحتاج إعداد', needs_2fa:'يحتاج رمز تحقق', broken:'متوقف' };
-let brands = [], currentBrand = null;
+let brands = [], currentBrand = null, meRole = 'merchant';
 
 async function api(path, opts = {}) {
     const r = await fetch(path, { headers: { 'content-type': 'application/json' }, ...opts });
@@ -95,35 +116,98 @@ $('logoutBtn').onclick = async () => { await fetch('/api/logout', { method: 'POS
 
 async function boot() {
     const me = await api('/api/me');
+    meRole = me.role;
     const data = await api('/api/brands');
     brands = data.brands;
-    // Merchants get a private single-restaurant page: no brand switcher, no admin list.
-    $('brandChips').style.display = me.role === 'merchant' ? 'none' : '';
-    $('brandChips').innerHTML = '';
+    const chips = $('brandChips');
+    chips.innerHTML = '';
     for (const b of brands) {
         const c = document.createElement('button');
         c.className = 'chip'; c.textContent = b.name_ar;
         c.onclick = () => selectBrand(b.id);
         c.id = 'chip-' + b.id;
-        $('brandChips').appendChild(c);
+        chips.appendChild(c);
     }
+    const add = document.createElement('button');
+    add.className = 'chip add'; add.textContent = '+ براند جديد';
+    add.onclick = addBrand;
+    chips.appendChild(add);
     showApp();
     if (brands[0]) selectBrand(brands[0].id);
+    else { $('mastBrand').textContent = 'أضف أول براند'; }
+}
+
+async function addBrand() {
+    const name = prompt('اسم البراند الجديد (مثال: مطعم بنجاب):');
+    if (!name || !name.trim()) return;
+    const r = await api('/api/brands', { method: 'POST', body: JSON.stringify({ name_ar: name.trim() }) });
+    if (!r.brand) return;
+    await boot();
+    selectBrand(r.brand.id);
 }
 
 async function selectBrand(id) {
     currentBrand = id;
     const b = brands.find((x) => x.id === id);
+    if (!b) return;
     $('mastBrand').textContent = b.name_ar;
-    for (const x of brands) $('chip-' + x.id).classList.toggle('on', x.id === id);
+    for (const x of brands) { const el = $('chip-' + x.id); if (el) el.classList.toggle('on', x.id === id); }
     const d = await api(`/api/brands/${id}/dashboard`);
+    $('demoNote').classList.toggle('hidden', !d.demo);
     $('stOrders').textContent = d.today_orders;
     $('stGross').textContent = d.today_gross.toLocaleString('en-US');
     $('stNet').textContent = d.today_net.toLocaleString('en-US');
     $('perApp').innerHTML = Object.entries(d.by_platform)
         .map(([p, v]) => `<tr><td>${PLATFORM_AR[p] || p}</td><td>${v.orders}</td><td>${v.gross.toLocaleString('en-US')}</td></tr>`).join('');
+    renderMenu(d.menu || []);
+    renderOffers(d.offers || []);
     renderAccounts((await api(`/api/brands/${id}/platform-accounts`)).accounts);
 }
+
+function renderMenu(menu) {
+    $('menuList').innerHTML = menu.length ? '' : '<div class="mut">لا توجد منتجات بعد.</div>';
+    for (const m of menu) {
+        const div = document.createElement('div');
+        div.className = 'row';
+        div.innerHTML = `<span>${m.name_ar} <span class="price">${m.price} ر.س</span></span>`;
+        const btn = document.createElement('button');
+        btn.className = 'small ' + (m.available ? 'off' : 'onb');
+        btn.textContent = m.available ? 'قفل المنتج' : 'تشغيل المنتج';
+        btn.onclick = async () => {
+            await api(`/api/brands/${currentBrand}/menu/${m.id}`, { method: 'PATCH', body: JSON.stringify({ available: !m.available }) });
+            selectBrand(currentBrand);
+        };
+        div.appendChild(btn);
+        $('menuList').appendChild(div);
+    }
+}
+
+function renderOffers(offers) {
+    $('offerList').innerHTML = offers.length ? '' : '<div class="mut">لا توجد عروض بعد. أضف أول عرض من الأسفل.</div>';
+    for (const o of offers) {
+        const div = document.createElement('div');
+        div.className = 'row';
+        const pct = o.discount_pct ? ` · خصم ${o.discount_pct}%` : '';
+        div.innerHTML = `<span>${o.title_ar}${pct}</span>`;
+        const btn = document.createElement('button');
+        btn.className = 'small ' + (o.active ? 'off' : 'onb');
+        btn.textContent = o.active ? 'إيقاف العرض' : 'تشغيل العرض';
+        btn.onclick = async () => {
+            await api(`/api/brands/${currentBrand}/offers/${o.id}`, { method: 'PATCH', body: JSON.stringify({ active: !o.active }) });
+            selectBrand(currentBrand);
+        };
+        div.appendChild(btn);
+        $('offerList').appendChild(div);
+    }
+}
+
+$('offerAdd').onclick = async () => {
+    const title = $('offerTitle').value.trim();
+    if (!title || !currentBrand) return;
+    await api(`/api/brands/${currentBrand}/offers`, { method: 'POST', body: JSON.stringify({ title_ar: title, discount_pct: $('offerPct').value }) });
+    $('offerTitle').value = ''; $('offerPct').value = '';
+    selectBrand(currentBrand);
+};
 
 function renderAccounts(accounts) {
     const byPlatform = Object.fromEntries(accounts.map((a) => [a.platform, a]));
@@ -149,8 +233,8 @@ async function connect(platform) {
     const username = $('u-' + platform).value.trim();
     const password = $('p-' + platform).value;
     if (!username || !password) return;
-    const r = await api(`/api/brands/${currentBrand}/platform-accounts`, { method: 'POST', body: JSON.stringify({ platform, username, password }) });
-    renderAccounts((await api(`/api/brands/${currentBrand}/platform-accounts`)).accounts);
+    await api(`/api/brands/${currentBrand}/platform-accounts`, { method: 'POST', body: JSON.stringify({ platform, username, password }) });
+    selectBrand(currentBrand);
 }
 
 (async () => { try { await boot(); } catch { showLogin(); } })();
