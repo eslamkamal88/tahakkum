@@ -49,6 +49,13 @@ h2 { font-size: 17px; color: var(--ink); margin: 20px 0 10px; }
 .mut { color: #8a8578; font-size: 12px; }
 .inlineform { display: grid; grid-template-columns: 2fr 1fr auto; gap: 8px; margin-top: 10px; align-items: end; }
 .inlineform label { margin: 0 0 4px; }
+.apphead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.apphead b { font-size: 15px; color: var(--ink); }
+.ministats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; background: #fbfaf7; border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin-bottom: 10px; }
+.ministats div { text-align: center; font-size: 11px; color: #8a8578; }
+.ministats b { display: block; font-size: 15px; color: var(--ink); }
+.menuadd { display: grid; grid-template-columns: 2fr 1fr auto; gap: 8px; margin-top: 8px; align-items: end; }
+.subh { font-size: 13px; font-weight: 800; color: var(--ink2); margin: 12px 0 6px; }
 </style>
 </head>
 <body>
@@ -73,11 +80,13 @@ h2 { font-size: 17px; color: var(--ink); margin: 20px 0 10px; }
       <div><b id="stGross">-</b>مبيعات اليوم (ر.س)</div>
       <div><b id="stNet">-</b>صافي اليوم (ر.س)</div>
     </div>
-    <h2>ملخص الفاتورة (اليوم)</h2>
+    <h2>التطبيقات</h2>
+    <div id="appSections"></div>
+    <h2>الملخص المجمع: الفاتورة (اليوم)</h2>
     <div class="card"><table><thead><tr><th>التطبيق</th><th>الطلبات</th><th>قبل النسبة (ر.س)</th><th>نسبة التطبيق %</th><th>بعد النسبة (ر.س)</th></tr></thead><tbody id="perApp"></tbody><tfoot id="perAppFoot"></tfoot></table></div>
     <h2>رسم المبيعات حسب التطبيق</h2>
     <div class="card" id="salesChart"></div>
-    <h2>المنيو (قفل وتشغيل المنتجات)</h2>
+    <h2>منتجات مشتركة (كل التطبيقات)</h2>
     <div class="card" id="menuList"></div>
     <h2>العروض</h2>
     <div class="card">
@@ -88,8 +97,6 @@ h2 { font-size: 17px; color: var(--ink); margin: 20px 0 10px; }
         <button class="small" id="offerAdd">أضف</button>
       </div>
     </div>
-    <h2>ربط بوابات التطبيقات</h2>
-    <div class="card conn-grid" id="connList"></div>
     <div class="foot">تحكم · بوابة إدارة تطبيقات التوصيل</div>
   </div>
 
@@ -160,11 +167,92 @@ async function selectBrand(id) {
     $('stOrders').textContent = d.today_orders;
     $('stGross').textContent = d.today_gross.toLocaleString('en-US');
     $('stNet').textContent = d.today_net.toLocaleString('en-US');
+    const accounts = (await api(`/api/brands/${id}/platform-accounts`)).accounts;
+    renderAppSections(d, accounts);
     renderInvoice(d);
     renderChart(d);
-    renderMenu(d.menu || []);
+    renderSharedMenu(d.menu || []);
     renderOffers(d.offers || []);
-    renderAccounts((await api(`/api/brands/${id}/platform-accounts`)).accounts);
+}
+
+function renderAppSections(d, accounts) {
+    const rates = d.commission_rates || {};
+    const byPlatform = Object.fromEntries(accounts.map((a) => [a.platform, a]));
+    const menu = d.menu || [];
+    const wrap = $('appSections');
+    wrap.innerHTML = '';
+    for (const [p, ar] of Object.entries(PLATFORM_AR)) {
+        const v = d.by_platform[p] || { orders: 0, gross: 0 };
+        const r = rates[p];
+        const has = r !== undefined && r !== null && r !== '';
+        const after = has ? (v.gross * (1 - Number(r) / 100)) : null;
+        const acc = byPlatform[p];
+        const items = menu.filter((m) => m.platform === p);
+        const card = document.createElement('div');
+        card.className = 'card';
+        let credHtml;
+        if (acc) {
+            credHtml = `<span class="status ${acc.status}">${STATUS_AR[acc.status] || acc.status}</span> <span class="mut">${acc.username}</span>`;
+        } else {
+            credHtml = `<div class="inlineform" style="grid-template-columns:1fr 1fr auto">
+                <div><label>اسم المستخدم</label><input id="u-${p}" autocomplete="off"></div>
+                <div><label>كلمة المرور</label><input id="p-${p}" type="password" autocomplete="off"></div>
+                <button class="small" data-p="${p}">ربط</button></div>`;
+        }
+        card.innerHTML = `
+            <div class="apphead"><b>${ar}</b>${acc ? credHtml : ''}<span class="spacer" style="flex:1"></span></div>
+            ${acc ? '' : credHtml}
+            <div class="ministats">
+                <div><b>${v.orders}</b>الطلبات</div>
+                <div><b>${v.gross.toLocaleString('en-US')}</b>قبل النسبة</div>
+                <div><input class="rate" type="number" min="0" max="100" step="0.1" placeholder="%" value="${has ? r : ''}" data-p="${p}" onchange="saveRate(this)">النسبة %</div>
+                <div><b>${after === null ? '-' : after.toLocaleString('en-US', { maximumFractionDigits: 2 })}</b>بعد النسبة</div>
+            </div>
+            <div class="subh">منيو ${ar}</div>
+            <div id="menu-${p}"></div>
+            <div class="menuadd">
+                <div><label>اسم المنتج</label><input id="mn-${p}"></div>
+                <div><label>السعر (ر.س)</label><input id="mp-${p}" type="number" min="0" step="0.5"></div>
+                <button class="small" data-add="${p}">أضف</button>
+            </div>`;
+        wrap.appendChild(card);
+        const list = card.querySelector('#menu-' + p);
+        list.innerHTML = items.length ? '' : '<div class="mut">لا توجد منتجات لهذا التطبيق بعد.</div>';
+        for (const m of items) list.appendChild(menuRow(m));
+        const addBtn = card.querySelector('button[data-add]');
+        addBtn.onclick = () => addProduct(p);
+        const connBtn = card.querySelector('button[data-p]');
+        if (connBtn && !acc) connBtn.onclick = () => connect(p);
+    }
+}
+
+function menuRow(m) {
+    const div = document.createElement('div');
+    div.className = 'row';
+    div.innerHTML = `<span>${m.name_ar} <span class="price">${m.price} ر.س</span></span>`;
+    const btn = document.createElement('button');
+    btn.className = 'small ' + (m.available ? 'off' : 'onb');
+    btn.textContent = m.available ? 'قفل المنتج' : 'تشغيل المنتج';
+    btn.onclick = async () => {
+        await api(`/api/brands/${currentBrand}/menu/${m.id}`, { method: 'PATCH', body: JSON.stringify({ available: !m.available }) });
+        selectBrand(currentBrand);
+    };
+    div.appendChild(btn);
+    return div;
+}
+
+async function addProduct(platform) {
+    const name = $('mn-' + platform).value.trim();
+    const price = $('mp-' + platform).value;
+    if (!name) return;
+    await api(`/api/brands/${currentBrand}/menu`, { method: 'POST', body: JSON.stringify({ name_ar: name, price, platform }) });
+    selectBrand(currentBrand);
+}
+
+function renderSharedMenu(menu) {
+    const shared = menu.filter((m) => !m.platform);
+    $('menuList').innerHTML = shared.length ? '' : '<div class="mut">لا توجد منتجات مشتركة.</div>';
+    for (const m of shared) $('menuList').appendChild(menuRow(m));
 }
 
 function renderInvoice(d) {
@@ -210,24 +298,6 @@ function renderChart(d) {
     el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="رسم المبيعات حسب التطبيق">${bars}${labels}</svg>`;
 }
 
-function renderMenu(menu) {
-    $('menuList').innerHTML = menu.length ? '' : '<div class="mut">لا توجد منتجات بعد.</div>';
-    for (const m of menu) {
-        const div = document.createElement('div');
-        div.className = 'row';
-        div.innerHTML = `<span>${m.name_ar} <span class="price">${m.price} ر.س</span></span>`;
-        const btn = document.createElement('button');
-        btn.className = 'small ' + (m.available ? 'off' : 'onb');
-        btn.textContent = m.available ? 'قفل المنتج' : 'تشغيل المنتج';
-        btn.onclick = async () => {
-            await api(`/api/brands/${currentBrand}/menu/${m.id}`, { method: 'PATCH', body: JSON.stringify({ available: !m.available }) });
-            selectBrand(currentBrand);
-        };
-        div.appendChild(btn);
-        $('menuList').appendChild(div);
-    }
-}
-
 function renderOffers(offers) {
     $('offerList').innerHTML = offers.length ? '' : '<div class="mut">لا توجد عروض بعد. أضف أول عرض من الأسفل.</div>';
     for (const o of offers) {
@@ -254,26 +324,6 @@ $('offerAdd').onclick = async () => {
     $('offerTitle').value = ''; $('offerPct').value = '';
     selectBrand(currentBrand);
 };
-
-function renderAccounts(accounts) {
-    const byPlatform = Object.fromEntries(accounts.map((a) => [a.platform, a]));
-    $('connList').innerHTML = '';
-    for (const [p, ar] of Object.entries(PLATFORM_AR)) {
-        const acc = byPlatform[p];
-        const div = document.createElement('div');
-        if (acc) {
-            div.className = 'row';
-            div.innerHTML = `<span><b>${ar}</b> · ${acc.username}</span><span class="status ${acc.status}">${STATUS_AR[acc.status] || acc.status}</span>`;
-        } else {
-            div.innerHTML = `<div class="row" style="border:none"><b>${ar}</b></div>
-                <label>اسم المستخدم</label><input id="u-${p}" autocomplete="off">
-                <label>كلمة المرور</label><input id="p-${p}" type="password" autocomplete="off">
-                <div style="margin-top:10px"><button data-p="${p}">ربط ${ar}</button></div>`;
-        }
-        $('connList').appendChild(div);
-    }
-    $('connList').querySelectorAll('button[data-p]').forEach((btn) => btn.onclick = () => connect(btn.dataset.p));
-}
 
 async function connect(platform) {
     const username = $('u-' + platform).value.trim();
