@@ -15,6 +15,7 @@ body { font-family: 'Segoe UI', Tahoma, sans-serif; background: var(--page); col
 .card { background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 18px; margin-bottom: 14px; box-shadow: 0 4px 14px -10px #06302b26; }
 label { display: block; font-size: 12.5px; font-weight: 700; color: var(--ink2); margin: 10px 0 4px; }
 input { width: 100%; border: 1.5px solid var(--line); border-radius: 12px; padding: 11px 13px; font-size: 15px; font-family: inherit; background: #fbfaf7; }
+input.rate { width: 72px; text-align: center; padding: 6px 8px; }
 input:focus { outline: none; border-color: var(--teal); background: #fff; }
 button { background: var(--ink); color: var(--gold); border: none; border-radius: 12px; padding: 12px 18px; font-size: 15px; font-weight: 800; font-family: inherit; cursor: pointer; }
 button:hover { background: var(--ink2); }
@@ -72,8 +73,10 @@ h2 { font-size: 17px; color: var(--ink); margin: 20px 0 10px; }
       <div><b id="stGross">-</b>مبيعات اليوم (ر.س)</div>
       <div><b id="stNet">-</b>صافي اليوم (ر.س)</div>
     </div>
-    <h2>اليوم حسب التطبيق</h2>
-    <div class="card"><table><thead><tr><th>التطبيق</th><th>الطلبات</th><th>المبيعات (ر.س)</th></tr></thead><tbody id="perApp"></tbody></table></div>
+    <h2>ملخص الفاتورة (اليوم)</h2>
+    <div class="card"><table><thead><tr><th>التطبيق</th><th>الطلبات</th><th>قبل النسبة (ر.س)</th><th>نسبة التطبيق %</th><th>بعد النسبة (ر.س)</th></tr></thead><tbody id="perApp"></tbody><tfoot id="perAppFoot"></tfoot></table></div>
+    <h2>رسم المبيعات حسب التطبيق</h2>
+    <div class="card" id="salesChart"></div>
     <h2>المنيو (قفل وتشغيل المنتجات)</h2>
     <div class="card" id="menuList"></div>
     <h2>العروض</h2>
@@ -157,11 +160,54 @@ async function selectBrand(id) {
     $('stOrders').textContent = d.today_orders;
     $('stGross').textContent = d.today_gross.toLocaleString('en-US');
     $('stNet').textContent = d.today_net.toLocaleString('en-US');
-    $('perApp').innerHTML = Object.entries(d.by_platform)
-        .map(([p, v]) => `<tr><td>${PLATFORM_AR[p] || p}</td><td>${v.orders}</td><td>${v.gross.toLocaleString('en-US')}</td></tr>`).join('');
+    renderInvoice(d);
+    renderChart(d);
     renderMenu(d.menu || []);
     renderOffers(d.offers || []);
     renderAccounts((await api(`/api/brands/${id}/platform-accounts`)).accounts);
+}
+
+function renderInvoice(d) {
+    const rates = d.commission_rates || {};
+    let tOrders = 0, tGross = 0, tNet = 0, tNetKnown = false;
+    $('perApp').innerHTML = Object.entries(d.by_platform).map(([p, v]) => {
+        tOrders += v.orders; tGross += v.gross;
+        const r = rates[p];
+        const has = r !== undefined && r !== null && r !== '';
+        let after = '<span class="mut">-</span>';
+        if (has) { const a = v.gross * (1 - Number(r) / 100); tNet += a; tNetKnown = true; after = a.toLocaleString('en-US', { maximumFractionDigits: 2 }); }
+        return `<tr><td>${PLATFORM_AR[p] || p}</td><td>${v.orders}</td><td>${v.gross.toLocaleString('en-US')}</td>` +
+            `<td><input class="rate" type="number" min="0" max="100" step="0.1" placeholder="%" value="${has ? r : ''}" data-p="${p}" onchange="saveRate(this)"></td>` +
+            `<td>${after}</td></tr>`;
+    }).join('');
+    $('perAppFoot').innerHTML = `<tr><td><b>الإجمالي</b></td><td><b>${tOrders}</b></td><td><b>${tGross.toLocaleString('en-US')}</b></td><td></td><td><b>${tNetKnown ? tNet.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '-'}</b></td></tr>`;
+}
+
+async function saveRate(input) {
+    const p = input.dataset.p;
+    const v = input.value === '' ? null : Number(input.value);
+    await api(`/api/brands/${currentBrand}/commission`, { method: 'PATCH', body: JSON.stringify({ platform: p, rate: v }) });
+    selectBrand(currentBrand);
+}
+
+function renderChart(d) {
+    const rows = Object.entries(d.by_platform).filter(([, v]) => v.gross > 0);
+    const el = $('salesChart');
+    if (!rows.length) { el.innerHTML = '<div class="mut">لا توجد مبيعات اليوم بعد.</div>'; return; }
+    const max = Math.max(...rows.map(([, v]) => v.gross));
+    const W = 720, H = 200, pad = 8;
+    const bw = Math.max(24, Math.floor((W - pad * 2) / rows.length) - 24);
+    const step = (W - pad * 2) / rows.length;
+    let bars = '', labels = '';
+    rows.forEach(([p, v], i) => {
+        const h = Math.max(2, Math.round((v.gross / max) * (H - 46)));
+        const x = pad + i * step + (step - bw) / 2;
+        const y = H - 24 - h;
+        bars += `<rect x="${x}" y="${y}" width="${bw}" height="${h}" rx="6" fill="#0f766e"/>`;
+        labels += `<text x="${x + bw / 2}" y="${y - 6}" text-anchor="middle" font-size="11" fill="#06302b">${v.gross.toLocaleString('en-US')}</text>`;
+        labels += `<text x="${x + bw / 2}" y="${H - 8}" text-anchor="middle" font-size="12" fill="#06302b">${PLATFORM_AR[p] || p}</text>`;
+    });
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="رسم المبيعات حسب التطبيق">${bars}${labels}</svg>`;
 }
 
 function renderMenu(menu) {
